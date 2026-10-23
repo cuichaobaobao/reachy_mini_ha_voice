@@ -50,6 +50,18 @@ async def main():
                     await asyncio.sleep(1)
             else:
                 raise TimeoutError("LVA startup timed out")
+            for _ in range(60):
+                if child.returncode is not None:
+                    raise RuntimeError(f"LVA exited {child.returncode}")
+                try:
+                    _reader, writer = await asyncio.open_connection("127.0.0.1", 6055)
+                    writer.close()
+                    await writer.wait_closed()
+                    break
+                except OSError:
+                    await asyncio.sleep(1)
+            else:
+                raise TimeoutError("Peripheral API startup timed out")
             await client.connect(login=True)
             info = await client.device_info()
             assert info.friendly_name == "Reachy CI", info
