@@ -62,7 +62,12 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 roll, pitch, yaw, right, left = motion.sample(now, now - previous)
                 reachy_mini.set_target(
                     head=create_head_pose(
-                        roll=roll, pitch=pitch, yaw=yaw, degrees=True
+                        z=motion.z,
+                        roll=roll,
+                        pitch=pitch,
+                        yaw=yaw,
+                        degrees=True,
+                        mm=False,
                     ),
                     antennas=[math.radians(right), math.radians(left)],
                 )

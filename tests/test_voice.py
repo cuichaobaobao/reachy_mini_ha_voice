@@ -36,7 +36,10 @@ def test_bounds_continuity_and_listening_freeze():
         pose = motion.sample(i / 30, 1 / 30)
         assert max(abs(x) for x in pose[:3]) <= 5
         assert max(abs(x) for x in pose[3:]) <= 15
-        assert max(abs(a - b) for a, b in zip(pose, previous)) <= 25 / 30 + 1e-9
+        assert (
+            max(abs(a - b) for a, b in zip(pose, previous))
+            <= (50 if motion.state == "idle" else 25) / 30 + 1e-9
+        )
         previous = pose
     motion.event({"event": "listening"})
     assert motion.sample(100, 10) == previous
@@ -114,3 +117,27 @@ def test_real_websocket_events_and_shutdown():
                 await asyncio.wait_for(task, 3)
 
     asyncio.run(exercise())
+
+
+def test_official_idle_breathing_and_wake_freeze():
+    import math
+
+    motion = Motion()
+    motion.sample(100, 0)
+    motion.sample(103.8, 1 / 30)  # 0.3 s idle delay + 1 s blend + 2.5 s phase
+    assert abs(motion.z - 0.005) < 1e-9
+    assert abs(motion.pose[3] - 15) < 1e-9
+    assert abs(motion.pose[4] + 15) < 1e-9
+    motion.sample(108.8, 1 / 30)
+    assert abs(motion.z + 0.005) < 1e-9
+    pose, z = tuple(motion.pose), motion.z
+    motion.event({"event": "wake_word_detected"})
+    assert motion.sample(109, 1 / 30) == pose
+    assert motion.z == z
+    motion.event({"event": "idle"})
+    assert motion.sample(110, 1 / 30) == pose
+    assert motion.z == z
+    for i in range(1000):
+        motion.sample(110 + i / 30, 1 / 30)
+        assert abs(motion.z) <= 0.005 + 1e-9
+        assert all(math.isfinite(x) for x in motion.pose)

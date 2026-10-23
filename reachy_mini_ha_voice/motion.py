@@ -8,6 +8,9 @@ class Motion:
         self.state = "idle"
         self.pose = [0.0] * 5  # roll, pitch, yaw, right antenna, left antenna (degrees)
         self.connected = False
+        self.z = 0.0  # metres
+        self._idle_started = None
+        self._idle_origin = None
 
     def event(self, message):
         if not isinstance(message, dict):
@@ -33,8 +36,32 @@ class Motion:
                 self.connected = False
 
     def sample(self, now, dt):
+        if self.state == "idle":
+            if self._idle_started is None:
+                self._idle_started = now
+                self._idle_origin = (tuple(self.pose), self.z)
+            elapsed = now - self._idle_started
+            if elapsed < 0.3:
+                return tuple(self.pose)
+            phase = max(0.0, elapsed - 1.3)
+            # Official BreathingMove amplitudes/frequencies. Blend from the
+            # previous pose for one second, avoiding its antenna phase jump.
+            blend = min(1.0, elapsed - 0.3)
+            sway = 15 * math.sin(2 * math.pi * 0.5 * phase)
+            target = [0.0, 0.0, 0.0, sway, -sway]
+            origin, origin_z = self._idle_origin
+            self.pose = [a + blend * (b - a) for a, b in zip(origin, target)]
+            self.z = (1 - blend) * origin_z + blend * 0.005 * math.sin(
+                2 * math.pi * 0.1 * phase
+            )
+            return tuple(self.pose)
+        self._idle_started = None
+        self._idle_origin = None
         if self.state == "listening":
             return tuple(self.pose)  # No motor noise during recognition.
+        self.z += max(
+            -0.01 * min(max(dt, 0), 0.05), min(0.01 * min(max(dt, 0), 0.05), -self.z)
+        )
         target = [0.0] * 5
         if self.state == "speaking":
             target = [
