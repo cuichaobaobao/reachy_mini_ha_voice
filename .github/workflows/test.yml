@@ -8,12 +8,17 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - run: sudo apt-get update && sudo apt-get install -y libmpv-dev libpulse0
+      - run: sudo apt-get update && sudo apt-get install -y libmpv-dev libpulse0 pulseaudio
       - uses: astral-sh/setup-uv@v6
       - run: uv pip install --system -e '.[test]'
       - run: python -m pytest -q
       - run: ruff check reachy_mini_ha_voice tests
       - run: python -m build
       - run: reachy-mini-app-assistant check .
-      - name: Check vendored Linux runtime imports
-        run: PYTHONPATH=reachy_mini_ha_voice/vendor/lva python -c 'import linux_voice_assistant.__main__'
+      - name: Start virtual audio and test real ESPHome runtime
+        run: |
+          pulseaudio --start --exit-idle-time=-1
+          pactl load-module module-null-sink sink_name=reachy_test
+          pactl set-default-sink reachy_test
+          pactl set-default-source reachy_test.monitor
+          python scripts/smoke_linux.py
