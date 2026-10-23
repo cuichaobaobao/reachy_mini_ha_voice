@@ -22,6 +22,32 @@ from reachy_mini.motion.head_wobbler import HeadWobbler
 _LOG = logging.getLogger(__name__)
 
 
+class _PlaybackLoop:
+    """One owner for GLib's default context used by SDK HeadWobbler timers."""
+    _lock = threading.Lock()
+    _users = 0
+    _loop = None
+    _thread = None
+
+    @classmethod
+    def acquire(cls):
+        with cls._lock:
+            if cls._users == 0:
+                cls._loop = GLib.MainLoop()
+                cls._thread = threading.Thread(target=cls._loop.run, daemon=True)
+                cls._thread.start()
+            cls._users += 1
+            return cls._thread
+
+    @classmethod
+    def release(cls):
+        with cls._lock:
+            cls._users -= 1
+            if cls._users == 0:
+                cls._loop.quit()
+                cls._thread.join(timeout=3)
+
+
 def on_owner(method):
     """LVA also calls players from its microphone thread."""
     @wraps(method)
@@ -38,9 +64,8 @@ class ReachyTtsPlayer:
         self._owner = threading.get_ident()
         Gst.init(None)
         self._async_loop = asyncio.get_running_loop()
-        self._loop = GLib.MainLoop()
-        self._thread = threading.Thread(target=self._loop.run, daemon=True)
-        self._thread.start()
+        self._thread = _PlaybackLoop.acquire()
+        self._closed = False
         self._wobble = wobble
         self._device = device
         self._robot = None
@@ -204,8 +229,10 @@ class ReachyTtsPlayer:
 
     @on_owner
     def close(self):
+        if self._closed:
+            return
+        self._closed = True
         self.stop()
-        self._loop.quit()
-        self._thread.join(timeout=3)
+        _PlaybackLoop.release()
         if self._robot is not None:
             self._robot.__exit__(None, None, None)

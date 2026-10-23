@@ -88,11 +88,13 @@ async def main():
                 assert calls == ['stopped']
             finally:
                 music.close()
-            assert not music._thread.is_alive()
+            assert music._thread is player._thread
+            assert player._thread.is_alive()  # Closing music must not stop TTS scheduling.
             print('GStreamer music: playlist, pause/resume, volume, duck, stop; no robot/offsets')
             print('Real TTS PCM -> official HeadWobbler: nonzero motion, EOS, replacement, stop passed')
     finally:
         player.close()
+        assert not player._thread.is_alive()
 
 
 asyncio.run(main())
