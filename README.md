@@ -28,6 +28,16 @@ license: apache-2.0
 
 若自动发现不可用，可在 HA 的 ESPHome 集成中手动输入**机器人 IP，端口 6053**。请勿将该端口转发到公网。语音状态内部接口仅绑定 `127.0.0.1:6055`。
 
+也可以使用官方 daemon 安装 API（将 `ROBOT_IP` 替换为你的机器人地址）：
+
+```sh
+curl -X POST http://ROBOT_IP:8000/api/apps/install \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"reachy_mini_ha_voice","source_kind":"hf_space","url":"https://huggingface.co/spaces/lichao622/reachy_mini_ha_voice"}'
+```
+
+如果 `pactl info` 无法连接音频服务，需要先启用系统的 PulseAudio 或 PipeWire-Pulse 服务；仅安装 `libpulse0` 不会自动创建音频服务器。应用日志会保留 LVA 的音频错误供诊断。
+
 停止其他占用机器人语音/动作的应用后再运行本应用。音频默认使用机器人系统默认输入/输出设备；如果设备选择不正确，可通过下述配置明确指定。
 
 ## 配置
