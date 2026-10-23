@@ -1,6 +1,9 @@
 """Actual PCM playback + official DSP; virtual speaker, no robot connection."""
 import asyncio
 import tempfile
+import threading
+from functools import partial
+from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import wave
 from pathlib import Path
 
@@ -23,11 +26,31 @@ async def main():
                 f.setframerate(16000)
                 f.writeframes((pcm * 32767).astype('<i2').tobytes())
             done = asyncio.Event()
-            player.play(str(path), done.set)
-            await asyncio.wait_for(done.wait(), 10)
+            server = ThreadingHTTPServer(
+                ("127.0.0.1", 0), partial(SimpleHTTPRequestHandler, directory=directory)
+            )
+            thread = threading.Thread(target=server.serve_forever, daemon=True)
+            thread.start()
+            try:
+                player.play(f"http://127.0.0.1:{server.server_port}/speech.wav", done.set)
+                await asyncio.wait_for(done.wait(), 10)
+            finally:
+                server.shutdown()
+                server.server_close()
+                thread.join(timeout=2)
             assert any(any(abs(x) > 1e-8 for x in item) for item in offsets), offsets
             assert offsets[-1] == (0,) * 6
             assert not player.is_playing
+            done.clear()
+            player.play(str(path), done.set)
+            await asyncio.sleep(0.3)
+            player.pause()
+            await asyncio.sleep(0.15)
+            paused_count = len(offsets)
+            await asyncio.sleep(0.2)
+            assert len(offsets) == paused_count, 'Offsets continued while paused'
+            player.resume()
+            await asyncio.wait_for(done.wait(), 10)
             calls = []
             player.play(str(path), lambda: calls.append('obsolete'))
             await asyncio.sleep(0.3)

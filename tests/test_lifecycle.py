@@ -45,6 +45,9 @@ def test_normal_stop_cleans_child_and_returns_neutral(
     robot.set_target.side_effect = lambda **_: stop.set()
     app_module.ReachyMiniHaVoice().run(robot, stop)
     stop_child.assert_called_once_with(child)
+    robot.start_head_tracking.assert_called_once_with(weight=1.0)
+    robot.stop_head_tracking.assert_called_once()
+    robot.disable_wobbling.assert_called_once()
     assert robot.set_target.call_count == 1
     assert robot.goto_target.call_count == 2
     assert robot.goto_target.call_args.kwargs["antennas"] == [0, 0]
