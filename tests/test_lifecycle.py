@@ -4,7 +4,7 @@ import asyncio
 import importlib
 import sys
 import threading
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 from unittest.mock import Mock
 
 import pytest
@@ -71,3 +71,42 @@ def test_child_failure_is_visible_and_cleaned(app_module, monkeypatch, tmp_path)
         app_module.ReachyMiniHaVoice().run(robot, threading.Event())
     stop_child.assert_called_once_with(child)
     assert robot.goto_target.call_count == 2
+
+
+def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monkeypatch, tmp_path):
+    """Exercise actual run() motor commands through wake, speech, hold and return."""
+    import math
+
+    monkeypatch.setenv("REACHY_HA_DATA_DIR", str(tmp_path))
+    child = Mock()
+    child.poll.return_value = None
+    monkeypatch.setattr(app_module, "start_voice", lambda *_: child)
+    monkeypatch.setattr(app_module, "stop_voice", Mock())
+    queue = app_module.Queue()
+    monkeypatch.setattr(app_module, "Queue", lambda: queue)
+    async def reader(*_):
+        return
+    monkeypatch.setattr(app_module, "events", reader)
+    ticks = iter([0, 0, 1.2, 2, 3, 4, 8, 8.75, 9.5])
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    stop = Mock()
+    stop.is_set.return_value = False
+    robot = Mock()
+    frames = []
+    queue.put({"event": "wake_word_detected", "data": {"direction": {
+        "angle": 0.0, "head_yaw": 0.0, "sampled_at": 0.0,
+    }}})
+    def record(**command):
+        frames.append(command)
+        if len(frames) == 2:
+            queue.put({"event": "tts_speaking"})
+        if len(frames) == 3:
+            queue.put({"event": "tts_finished"})
+        if len(frames) == 8:
+            stop.is_set.return_value = True
+    robot.set_target.side_effect = record
+    app_module.ReachyMiniHaVoice().run(robot, stop)
+    for frame, expected in zip(frames, [0, 90, 90, 90, 90, 90, 45, 0]):
+        assert frame['head']['yaw'] == pytest.approx(expected)
+        assert frame['body_yaw'] == pytest.approx(math.radians(expected))
+    assert robot.goto_target.call_args.kwargs['body_yaw'] == 0.0

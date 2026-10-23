@@ -13,3 +13,6 @@ User approved actual TTS PCM driving official HeadWobbler, frozen listening ante
 
 ## 0.3.0 wake direction (approved)
 Read daemon DOA with measured head pose before wake sound; cache recent speech only, ignore playback, convert relative angle into world yaw. Use 6 degree deadband, full angle clamped to conservative ±40 degree base yaw, smooth turn duration clamp(abs(delta)/75, .65, 1.25). Keep conversation heading separate from thinking/TTS offsets. After real playback finish and no continued listening, wait 5 seconds then return over 1.5 seconds. New wake cancels hold/return and targets new direction directly. Visual tracking stays off by default; acoustic heading takes priority when enabled. No robot connection during development; virtual daemon, lifecycle and Linux audio tests before GitHub/HF publication.
+
+## 0.3.1 coordinated wake turn (approved correction)
+Remove arbitrary ±40° cap. Full DOA-derived heading drives both world head yaw and body yaw via the same smoothed trajectory, bounded only by ±160° body range. Thinking and audio sway remain head-only offsets. Both axes return to zero after 5s hold over 1.5s. Test actual app output, not just heading arithmetic.

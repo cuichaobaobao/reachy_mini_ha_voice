@@ -7,7 +7,7 @@ _LOG = logging.getLogger(__name__)
 
 
 class Heading:
-    LIMIT = 40.0  # Conservative base yaw; leave room for speech/thinking offsets.
+    BODY_YAW_LIMIT = 160.0  # SDK/body mechanical range; not a neck rotation limit.
 
     def __init__(self):
         self.yaw = 0.0
@@ -67,7 +67,7 @@ class Heading:
                     relative = 90.0 - math.degrees(angle)
                     if abs(relative) < 6.0:
                         return
-                    target = max(-self.LIMIT, min(self.LIMIT, measured_yaw + relative))
+                    target = max(-self.BODY_YAW_LIMIT, min(self.BODY_YAW_LIMIT, measured_yaw + relative))
                     duration = max(0.65, min(1.25, abs(target - self.yaw) / 75.0))
                     _LOG.info("Wake turn: relative %.1f°, target %.1f°, duration %.2fs",
                               relative, target, duration)

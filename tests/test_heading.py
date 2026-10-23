@@ -15,17 +15,17 @@ def wake(now, relative=30, measured=0):
 
 
 def test_full_angle_duration_and_deadband():
-    for relative, duration in [(5, None), (30, .65), (40, .65), (90, .65)]:
+    for relative, duration in [(5, None), (30, .65), (40, .65), (90, 1.2)]:
         h = Heading()
         h.event(wake(10, relative), 10)
         if duration is None:
             assert h.sample(12) == 0
         else:
-            assert h.sample(10 + duration / 2) == pytest.approx(min(relative, 40) / 2)
-            assert h.sample(10 + duration) == pytest.approx(min(relative, 40))
-    h.event(wake(12, -80, 40), 12)
-    assert h.sample(12 + (80 / 75) / 2) == pytest.approx(0)
-    assert h.sample(14) == -40
+            assert h.sample(10 + duration / 2) == pytest.approx(relative / 2)
+            assert h.sample(10 + duration) == pytest.approx(relative)
+    h.event(wake(12, -80, 90), 12)
+    assert h.sample(12 + (80 / 75) / 2) == pytest.approx(50)
+    assert h.sample(14) == pytest.approx(10)
 
 
 def test_hold_reply_completion_duplicate_idle_and_return():
@@ -183,3 +183,10 @@ def test_long_tts_never_returns_before_playback_completion():
     assert h.sample(205) == pytest.approx(30)
     h.sample(206)
     assert h.sample(207.5) == 0
+
+
+@pytest.mark.parametrize('measured,relative,expected', [(130, 60, 160), (-130, -60, -160), (70, 60, 130)])
+def test_full_world_heading_uses_only_body_boundary(measured, relative, expected):
+    h = Heading()
+    h.event(wake(10, relative, measured), 10)
+    assert h.sample(11.25) == pytest.approx(expected)

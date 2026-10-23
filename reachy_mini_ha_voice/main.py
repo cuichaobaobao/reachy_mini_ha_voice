@@ -47,7 +47,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             reachy_mini.wake_up()
             awake = True
             reachy_mini.goto_target(
-                head=create_head_pose(), antennas=[0, 0], duration=1.0
+                head=create_head_pose(), antennas=[0, 0], body_yaw=0.0, duration=1.0
             )
             if settings.get("head_tracking", False) is True:
                 reachy_mini.start_head_tracking(weight=1.0)
@@ -89,6 +89,9 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                         mm=False,
                     ),
                     antennas=[math.radians(right), math.radians(left)],
+                    # Same world heading for head and body: the neck only carries
+                    # the small gesture offsets. TTS offsets are added by daemon.
+                    body_yaw=math.radians(facing),
                 )
                 previous = now
                 stop_event.wait(1 / 30)
@@ -101,7 +104,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 reachy_mini.stop_head_tracking()
                 reachy_mini.disable_wobbling()
                 reachy_mini.goto_target(
-                    head=create_head_pose(), antennas=[0, 0], duration=1.0
+                    head=create_head_pose(), antennas=[0, 0], body_yaw=0.0, duration=1.0
                 )
 
 
