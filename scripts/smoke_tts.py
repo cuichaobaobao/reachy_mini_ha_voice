@@ -69,13 +69,15 @@ async def main():
                 music.play([str(path), str(path)], music_done.set)
                 music.set_volume(60)
                 music.duck(.5)
-                assert abs(music._pipeline.get_property('volume') - .3) < 1e-6
+                assert abs(music._pipeline.get_property('volume') - .3) < 1e-3
                 await asyncio.sleep(.2)
                 music.pause()
                 await asyncio.sleep(.2)
                 assert music.is_playing
                 music.unduck()
-                assert abs(music._pipeline.get_property('volume') - .6) < 1e-6
+                # PulseAudio round-trips volume through its finite-resolution scale.
+                volume = music._pipeline.get_property('volume')
+                assert abs(volume - .6) < 1e-3, volume
                 music.resume()
                 await asyncio.wait_for(music_done.wait(), 10)
                 assert not music.is_playing
