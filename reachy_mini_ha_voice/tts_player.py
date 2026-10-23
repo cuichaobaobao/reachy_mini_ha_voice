@@ -1,6 +1,6 @@
 """LVA TTS playback with the SDK's clock-driven HeadWobbler.
 
-Music stays on upstream mpv. A local daemon client sends only speech offsets;
+Music uses this player with wobbling disabled. A local daemon client sends only speech offsets;
 the app remains the sole owner of the base head pose and antenna targets.
 """
 
@@ -34,13 +34,14 @@ def on_owner(method):
 
 
 class ReachyTtsPlayer:
-    def __init__(self, device=None, offset_callback=None):
+    def __init__(self, device=None, offset_callback=None, wobble=True):
         self._owner = threading.get_ident()
         Gst.init(None)
         self._async_loop = asyncio.get_running_loop()
         self._loop = GLib.MainLoop()
         self._thread = threading.Thread(target=self._loop.run, daemon=True)
         self._thread.start()
+        self._wobble = wobble
         self._device = device
         self._robot = None
         self._offset_callback = offset_callback
@@ -64,7 +65,7 @@ class ReachyTtsPlayer:
         self._clear()
         self._urls = [url] if isinstance(url, str) else list(url)
         self._callback = done_callback
-        if self._robot is None and self._offset_callback is None:
+        if self._wobble and self._robot is None and self._offset_callback is None:
             from reachy_mini import ReachyMini
             self._robot = ReachyMini(
                 media_backend="no_media", connection_mode="localhost_only"
@@ -82,12 +83,17 @@ class ReachyTtsPlayer:
             url = Path(url).resolve().as_uri()
         # Both branches use the same pipeline clock. appsink sync=True releases
         # PCM at playback time, as in the SDK's GStreamer audio sink tee.
-        sink = Gst.parse_bin_from_description(
-            'audioconvert ! audioresample ! audio/x-raw,format=F32LE,rate=16000,channels=1 '
-            '! tee name=t t. ! queue ! audioconvert ! audioresample '
-            '! pulsesink name=speaker t. ! queue ! appsink name=motion '
-            'emit-signals=true sync=true max-buffers=8 drop=false', True
-        )
+        if self._wobble:
+            description = (
+                'audioconvert ! audioresample ! audio/x-raw,format=F32LE,rate=16000,channels=1 '
+                '! tee name=t t. ! queue ! audioconvert ! audioresample '
+                '! pulsesink name=speaker t. ! queue ! appsink name=motion '
+                'emit-signals=true sync=true max-buffers=8 drop=false'
+            )
+        else:
+            # Preserve music channels/rate and never connect a robot or emit offsets.
+            description = 'audioconvert ! audioresample ! pulsesink name=speaker'
+        sink = Gst.parse_bin_from_description(description, True)
         if self._device:
             sink.get_by_name("speaker").set_property(
                 "device", None if self._device == "pulse/default" else self._device.removeprefix("pulse/")
@@ -97,9 +103,11 @@ class ReachyTtsPlayer:
         pipeline.set_property("audio-sink", sink)
         pipeline.set_property("video-sink", Gst.ElementFactory.make("fakesink"))
         pipeline.set_property("volume", self._volume * self._duck)
-        wobbler = HeadWobbler(self._offsets, sample_rate=16000)
-        wobbler.start()
-        sink.get_by_name("motion").connect("new-sample", self._sample, wobbler)
+        wobbler = None
+        if self._wobble:
+            wobbler = HeadWobbler(self._offsets, sample_rate=16000)
+            wobbler.start()
+            sink.get_by_name("motion").connect("new-sample", self._sample, wobbler)
         bus = pipeline.get_bus()
         bus.add_signal_watch()
         bus.connect("message", self._message, self._generation)
@@ -161,12 +169,14 @@ class ReachyTtsPlayer:
     def pause(self):
         if self._pipeline is not None:
             self._pipeline.set_state(Gst.State.PAUSED)
-            self._wobbler.stop()
+            if self._wobbler is not None:
+                self._wobbler.stop()
 
     @on_owner
     def resume(self):
         if self._pipeline is not None:
-            self._wobbler.start()
+            if self._wobbler is not None:
+                self._wobbler.start()
             self._pipeline.set_state(Gst.State.PLAYING)
 
     @property

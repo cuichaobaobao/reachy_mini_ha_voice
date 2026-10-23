@@ -1,6 +1,7 @@
 """Boot the real LVA runtime against a virtual Linux audio device and ESPHome client."""
 
 import asyncio
+import ctypes.util
 import os
 import sys
 import tempfile
@@ -13,6 +14,8 @@ VENDOR = ROOT / "reachy_mini_ha_voice/vendor/lva"
 
 
 async def main():
+    assert ctypes.util.find_library("mpv") is None, "Regression must run without libmpv"
+    print("Confirmed libmpv absent; testing real LVA startup")
     with tempfile.TemporaryDirectory(prefix="ha-voice-smoke-") as directory:
         env = dict(os.environ, PYTHONPATH=str(VENDOR), PYTHONUNBUFFERED="1")
         child = await asyncio.create_subprocess_exec(

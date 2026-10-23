@@ -19,7 +19,6 @@ from pymicro_wakeword import MicroWakeWord, MicroWakeWordFeatures
 from pyopen_wakeword import OpenWakeWord, OpenWakeWordFeatures
 
 from .models import Preferences, ServerState, WakeWordType, initial_stop_word_threshold
-from .mpv_player import MpvMediaPlayer
 from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
 from reachy_mini_ha_voice.direction import DirectionReader
 from .peripheral_api import LVAEvent, PeripheralAPIServer
@@ -70,7 +69,7 @@ async def main() -> None:
     )
     parser.add_argument(
         "--music-output-device",
-        help="mpv name for the music/media output device (defaults to --audio-output-device)",
+        help="PulseAudio name for the music/media output device (defaults to --audio-output-device)",
     )
     parser.add_argument(
         "--list-output-devices",
@@ -269,14 +268,10 @@ async def main() -> None:
         return
 
     if args.list_output_devices:
-        from mpv import MPV
-
-        player = MPV()
         print("Audio output devices:")
         print("=" * 14)
-
-        for speaker in player.audio_device_list:  # type: ignore
-            print(speaker["name"] + ":", speaker["description"])
+        for speaker in sc.all_speakers():
+            print("pulse/" + str(speaker.id) + ":", speaker.name)
         return
 
     # Resolve network interface for mac-address detection
@@ -438,7 +433,7 @@ async def main() -> None:
         wake_words=wake_models,
         active_wake_words=active_wake_words,
         stop_word=stop_model,
-        music_player=MpvMediaPlayer(device=args.music_output_device or args.audio_output_device),
+        music_player=ReachyTtsPlayer(device=args.music_output_device or args.audio_output_device, wobble=False),
         tts_player=ReachyTtsPlayer(device=args.audio_output_device),
         wakeup_sound=args.wakeup_sound,
         start_listening_sound=args.start_listening_sound,
@@ -604,6 +599,7 @@ async def main() -> None:
     finally:
         state.wake_direction_reader.close()
         state.tts_player.close()
+        state.music_player.close()
         state.audio_queue.put_nowait(None)
         process_audio_thread.join()
         if peripheral_api is not None:

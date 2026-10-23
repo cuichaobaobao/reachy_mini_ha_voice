@@ -27,7 +27,7 @@ if TYPE_CHECKING:
         WakeWord1SensitivityNumberEntity,
         WakeWord2SensitivityNumberEntity,
     )
-    from .mpv_player import MpvMediaPlayer
+    from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
     from .satellite import VoiceSatelliteProtocol
 
 _LOGGER = logging.getLogger(__name__)
@@ -111,8 +111,8 @@ class ServerState:
     wake_words: "Dict[str, Union[MicroWakeWord, OpenWakeWord]]"
     active_wake_words: Set[str]
     stop_word: "MicroWakeWord"
-    music_player: "MpvMediaPlayer"
-    tts_player: "MpvMediaPlayer"
+    music_player: "ReachyTtsPlayer"
+    tts_player: "ReachyTtsPlayer"
     wakeup_sound: str
     start_listening_sound: str
     processing_sound: str

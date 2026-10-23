@@ -16,3 +16,6 @@ Read daemon DOA with measured head pose before wake sound; cache recent speech o
 
 ## 0.3.1 coordinated wake turn (approved correction)
 Remove arbitrary ±40° cap. Full DOA-derived heading drives both world head yaw and body yaw via the same smoothed trajectory, bounded only by ±160° body range. Thinking and audio sway remain head-only offsets. Both axes return to zero after 5s hold over 1.5s. Test actual app output, not just heading arithmetic.
+
+## 0.3.2 robot startup fix
+User robot fails due to missing libmpv. Remove runtime dependency and switch music to GStreamer without speech motion. Test actual LVA boot and media controls in Linux with libmpv absent, then publish GitHub/HF. Do not connect to robot or install OS packages on it.

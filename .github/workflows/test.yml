@@ -11,7 +11,9 @@ jobs:
       - name: Use Ubuntu archive for system dependencies
         run: |
           sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E 's|https?://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' {} +
-      - run: sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y libmpv-dev libpulse0 pulseaudio libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pulseaudio gstreamer1.0-plugins-good gstreamer1.0-libav
+      - run: sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y libpulse0 pulseaudio libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pulseaudio gstreamer1.0-plugins-good gstreamer1.0-libav
+      - name: Ensure libmpv is absent (Wireless startup regression)
+        run: sudo apt-get purge -y libmpv2 libmpv-dev mpv
       - uses: astral-sh/setup-uv@v6
       - run: uv pip install --system -e '.[test]'
       - run: python -m pytest -q

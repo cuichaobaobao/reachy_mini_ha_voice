@@ -1,7 +1,6 @@
 """Own the upstream LVA process and consume its public peripheral API."""
 
 import asyncio
-import ctypes.util
 import json
 import logging
 import os
@@ -47,10 +46,6 @@ def command(data_dir, settings):
 def start_voice(data_dir, settings):
     if sys.platform != "linux":
         raise RuntimeError("Voice runtime requires Linux on Reachy Mini Wireless.")
-    if not ctypes.util.find_library("mpv"):
-        raise RuntimeError(
-            "Missing libmpv. Install Linux packages: sudo apt-get install libmpv2 libpulse0"
-        )
     data_dir.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
     environment["PYTHONPATH"] = os.pathsep.join((str(VENDOR), str(VENDOR.parents[2])))

@@ -36,7 +36,7 @@ from aioesphomeapi.model import (
 from google.protobuf import message
 
 from .api_server import APIServer
-from .mpv_player import MpvMediaPlayer
+from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
 from .util import call_all
 
 SUPPORTED_MEDIA_PLAYER_FEATURES = (
@@ -69,8 +69,8 @@ class MediaPlayerEntity(ESPHomeEntity):
         key: int,
         name: str,
         object_id: str,
-        music_player: MpvMediaPlayer,
-        announce_player: MpvMediaPlayer,
+        music_player: ReachyTtsPlayer,
+        announce_player: ReachyTtsPlayer,
         initial_volume: float = 1.0,
         on_volume_changed: Optional[Callable[[float], None]] = None,
     ) -> None:
