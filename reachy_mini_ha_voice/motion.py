@@ -35,7 +35,11 @@ class Motion:
             if event == "disconnected":
                 self.connected = False
 
-    def sample(self, now, dt):
+    def sample(self, now, dt, allow_breathing=True):
+        if self.state == "idle" and not allow_breathing:
+            self._idle_started = None
+            self._idle_origin = None
+            return tuple(self.pose)
         if self.state == "idle":
             if self._idle_started is None:
                 self._idle_started = now

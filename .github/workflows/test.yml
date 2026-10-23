@@ -25,3 +25,4 @@ jobs:
           pactl set-default-source reachy_test.monitor
           python scripts/smoke_linux.py
           python scripts/smoke_tts.py
+          python scripts/smoke_direction.py

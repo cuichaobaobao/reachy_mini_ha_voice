@@ -895,7 +895,9 @@ class VoiceSatelliteProtocol(APIServer):
         self._timer_ring_start = None
         _LOGGER.debug("Stopping timer finished sound")
         self._pipeline_active = True
-        self._emit(LVAEvent.WAKE_WORD_DETECTED)
+        direction_reader = getattr(self.state, "wake_direction_reader", None)
+        direction_data = direction_reader.snapshot() if direction_reader is not None else {}
+        self._emit(LVAEvent.WAKE_WORD_DETECTED, direction_data)
         self.duck()
         if self.state.listen_during_wake_sound:
             _LOGGER.debug("Starting audio streaming immediately (listen_during_wake_sound enabled)")

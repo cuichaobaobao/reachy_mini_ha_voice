@@ -21,6 +21,7 @@ from pyopen_wakeword import OpenWakeWord, OpenWakeWordFeatures
 from .models import Preferences, ServerState, WakeWordType, initial_stop_word_threshold
 from .mpv_player import MpvMediaPlayer
 from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
+from reachy_mini_ha_voice.direction import DirectionReader
 from .peripheral_api import LVAEvent, PeripheralAPIServer
 from .satellite import VoiceSatelliteProtocol
 from .util import (
@@ -561,6 +562,9 @@ async def main() -> None:
     )
     process_audio_thread.start()
 
+    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing)
+    state.wake_direction_reader.start()
+
     # Auto discovery (zeroconf, mDNS)
     discovery = HomeAssistantZeroconf(
         port=args.port,
@@ -598,6 +602,7 @@ async def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        state.wake_direction_reader.close()
         state.tts_player.close()
         state.audio_queue.put_nowait(None)
         process_audio_thread.join()

@@ -12,6 +12,7 @@ from queue import Empty, Queue
 from reachy_mini import ReachyMiniApp
 from reachy_mini.utils import create_head_pose
 
+from .heading import Heading
 from .motion import Motion
 from .runtime import events, start_voice, stop_voice
 
@@ -39,6 +40,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             name="ha-voice-events",
         )
         motion = Motion()
+        heading = Heading()
         awake = False
         try:
             reader.start()
@@ -51,6 +53,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 reachy_mini.start_head_tracking(weight=1.0)
             else:
                 reachy_mini.stop_head_tracking()
+            tracking = settings.get("head_tracking", False) is True
             previous = time.monotonic()
             while not stop_event.is_set():
                 if process.poll() is not None:
@@ -60,16 +63,28 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 now = time.monotonic()
                 for _ in range(100):
                     try:
-                        motion.event(queue.get_nowait())
+                        message = queue.get_nowait()
+                        motion.event(message)
+                        heading.event(message, now)
                     except Empty:
                         break
-                roll, pitch, yaw, right, left = motion.sample(now, now - previous)
+                facing = heading.sample(now)
+                want_tracking = settings.get("head_tracking", False) is True and not heading.active
+                if tracking != want_tracking:
+                    if want_tracking:
+                        reachy_mini.start_head_tracking(weight=1.0)
+                    else:
+                        reachy_mini.stop_head_tracking()
+                    tracking = want_tracking
+                roll, pitch, yaw, right, left = motion.sample(
+                    now, now - previous, allow_breathing=not heading.active
+                )
                 reachy_mini.set_target(
                     head=create_head_pose(
                         z=motion.z,
                         roll=roll,
                         pitch=pitch,
-                        yaw=yaw,
+                        yaw=yaw + facing,
                         degrees=True,
                         mm=False,
                     ),
