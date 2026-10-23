@@ -170,3 +170,16 @@ def test_real_daemon_http_polling_playback_suppression_and_cleanup():
         server.server_close()
         thread.join(timeout=2)
     assert not reader._thread.is_alive()
+
+
+def test_long_tts_never_returns_before_playback_completion():
+    h = Heading()
+    h.event(wake(0), 0)
+    h.sample(1)
+    h.event({"event": "tts_speaking"}, 2)
+    assert h.sample(200) == pytest.approx(30)
+    assert h.active
+    h.event({"event": "tts_finished"}, 201)
+    assert h.sample(205) == pytest.approx(30)
+    h.sample(206)
+    assert h.sample(207.5) == 0

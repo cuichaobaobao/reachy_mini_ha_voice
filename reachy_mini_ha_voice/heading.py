@@ -23,6 +23,7 @@ class Heading:
     def sample(self, now):
         if self._watchdog is not None and now >= self._watchdog:
             self._watchdog = None
+            self._ending = True
             self._return_at = now  # Lost terminal event: do not stay turned forever.
         if self._return_at is not None and now >= self._return_at:
             self._return_at = None
@@ -34,7 +35,7 @@ class Heading:
             self.yaw = start + (target - start) * blend
             if t == 1:
                 self._trajectory = None
-                if target == 0 and self._watchdog is None and self._return_at is None:
+                if target == 0 and self._ending and self._return_at is None:
                     self.active = False
         return self.yaw
 
@@ -48,7 +49,8 @@ class Heading:
             if self._ending:
                 self._trajectory = None
             self._ending = False
-            self._watchdog = now + 120.0
+            # Long TTS must never return before actual playback completion.
+            self._watchdog = None if event == "tts_speaking" else now + 120.0
             self.active = True
             if event == "wake_word_detected":
                 self._trajectory = None  # Also stop a return when direction is missing.
