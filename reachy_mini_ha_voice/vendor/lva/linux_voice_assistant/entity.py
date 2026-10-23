@@ -1,0 +1,884 @@
+import logging
+from abc import abstractmethod
+from collections.abc import Iterable
+from typing import Callable, List, Optional, Union
+
+# pylint: disable=no-name-in-module
+from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
+    EventResponse,
+    LightCommandRequest,
+    LightStateResponse,
+    ListEntitiesEventResponse,
+    ListEntitiesLightResponse,
+    ListEntitiesMediaPlayerResponse,
+    ListEntitiesNumberResponse,
+    ListEntitiesRequest,
+    ListEntitiesSelectResponse,
+    ListEntitiesSwitchResponse,
+    MediaPlayerCommandRequest,
+    MediaPlayerStateResponse,
+    NumberCommandRequest,
+    NumberStateResponse,
+    SelectCommandRequest,
+    SelectStateResponse,
+    SubscribeHomeAssistantStatesRequest,
+    SwitchCommandRequest,
+    SwitchStateResponse,
+)
+from aioesphomeapi.model import (
+    ColorMode,
+    EntityCategory,
+    MediaPlayerCommand,
+    MediaPlayerEntityFeature,
+    MediaPlayerState,
+    NumberMode,
+)
+from google.protobuf import message
+
+from .api_server import APIServer
+from .mpv_player import MpvMediaPlayer
+from .util import call_all
+
+SUPPORTED_MEDIA_PLAYER_FEATURES = (
+    MediaPlayerEntityFeature.PLAY
+    | MediaPlayerEntityFeature.PAUSE
+    | MediaPlayerEntityFeature.STOP
+    | MediaPlayerEntityFeature.PLAY_MEDIA
+    | MediaPlayerEntityFeature.VOLUME_SET
+    | MediaPlayerEntityFeature.VOLUME_MUTE
+    | MediaPlayerEntityFeature.MEDIA_ANNOUNCE
+)
+
+
+class ESPHomeEntity:
+    def __init__(self, server: APIServer) -> None:
+        self.server = server
+
+    @abstractmethod
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        pass
+
+
+# -----------------------------------------------------------------------------
+
+
+class MediaPlayerEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        music_player: MpvMediaPlayer,
+        announce_player: MpvMediaPlayer,
+        initial_volume: float = 1.0,
+        on_volume_changed: Optional[Callable[[float], None]] = None,
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.state = MediaPlayerState.IDLE
+        self.volume = max(0.0, min(1.0, initial_volume))
+        self.muted = False
+        self.previous_volume = 1.0
+        self.music_player = music_player
+        self.announce_player = announce_player
+        self._on_volume_changed = on_volume_changed
+        self.apply_volume_from_state(initial_volume)
+        self._log = logging.getLogger(f"{self.__class__.__name__}[{self.key}]")
+
+    def _broadcast_state(self, msgs: Iterable[message.Message]) -> None:
+        """Push an asynchronous state change to all connected clients.
+
+        Playback-completion callbacks fire outside any request, so the update
+        must reach every subscribed client rather than the single connection in
+        ``self.server`` (which may belong to another client, or be closed).
+        """
+        state = getattr(self.server, "state", None)
+        if state is not None:
+            state.broadcast(msgs)
+        else:  # pragma: no cover - no ServerState (e.g. a bare APIServer)
+            self.server.send_messages(msgs)
+
+    def play(
+        self,
+        url: Union[str, List[str]],
+        announcement: bool = False,
+        done_callback: Optional[Callable[[], None]] = None,
+    ) -> Iterable[message.Message]:
+        if announcement:
+            self._log.debug("PLAY: announcement true")
+            if self.music_player.is_playing:
+                # Announce, resume music
+                self.music_player.pause()
+                self.announce_player.play(
+                    url,
+                    done_callback=lambda: call_all(self.music_player.resume, done_callback),
+                )
+            else:
+                # Announce, idle
+                self.announce_player.play(
+                    url,
+                    done_callback=lambda: call_all(
+                        lambda: self._broadcast_state([self._update_state(MediaPlayerState.IDLE)]),
+                        done_callback,
+                    ),
+                )
+        else:
+            self._log.debug("PLAY: announcement false")
+            # Music
+            self.music_player.play(
+                url,
+                done_callback=lambda: call_all(
+                    lambda: self._broadcast_state([self._update_state(MediaPlayerState.IDLE)]),
+                    done_callback,
+                ),
+            )
+
+        yield self._update_state(MediaPlayerState.PLAYING)
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        self._log.debug("handle_message called with msg: %s", msg)
+
+        # Suppress warning for irrelevant NumberCommandRequest
+        if isinstance(msg, (NumberCommandRequest, SelectCommandRequest)):
+            return
+
+        if isinstance(msg, MediaPlayerCommandRequest) and (msg.key == self.key):
+            self._log.debug("MediaPlayerCommandRequest matched for this key")
+
+            if msg.has_media_url:
+                self._log.debug("Executing PLAY")
+                self._log.debug("Message has media URL: %s", msg.media_url)
+                announcement = msg.has_announcement and msg.announcement
+                yield from self.play(msg.media_url, announcement=announcement)
+
+            elif msg.has_command:
+                self._log.debug("Message has command: %s", msg.command)
+                command = MediaPlayerCommand(msg.command)
+
+                if msg.command == MediaPlayerCommand.PAUSE:
+                    self._log.debug("Executing PAUSE")
+                    self.music_player.pause()
+                    yield self._update_state(MediaPlayerState.PAUSED)
+
+                elif msg.command == MediaPlayerCommand.PLAY:
+                    self._log.debug("Executing PLAY / RESUME")
+                    self.music_player.resume()
+                    yield self._update_state(MediaPlayerState.PLAYING)
+
+                elif command == MediaPlayerCommand.STOP:
+                    self._log.debug("Executing STOP")
+                    self.music_player.stop()
+                    yield self._update_state(MediaPlayerState.IDLE)
+
+                elif command == MediaPlayerCommand.MUTE:
+                    self._log.debug("Executing MUTE")
+                    if not self.muted:
+                        self.previous_volume = self.volume
+                        self.volume = 0
+                        self.music_player.set_volume(0)
+                        self.announce_player.set_volume(0)
+                        self.muted = True
+                        if hasattr(self.server, "state") and getattr(self.server, "state", None) is not None:
+                            self.server.state.persist_volume(self.volume)
+                    yield self._update_state(self.state)
+
+                elif command == MediaPlayerCommand.UNMUTE:
+                    self._log.debug("Executing UNMUTE")
+                    if self.muted:
+                        self.volume = self.previous_volume
+                        self.music_player.set_volume(int(self.volume * 100))
+                        self.announce_player.set_volume(int(self.volume * 100))
+                        self.muted = False
+                        if hasattr(self.server, "state") and getattr(self.server, "state", None) is not None:
+                            self.server.state.persist_volume(self.volume)
+                    yield self._update_state(self.state)
+
+            elif msg.has_volume:
+                self._log.debug("Message has volume: %.2f", msg.volume)
+                self._apply_volume(msg.volume, persist=True)
+                if hasattr(self.server, "state") and getattr(self.server, "state", None) is not None:
+                    self._log.debug("Persisting volume to preferences")
+                    self.server.state.persist_volume(self.volume)
+                else:
+                    self._log.warning("Cannot persist volume - server.state not available")
+                yield self._update_state(self.state)
+
+        elif isinstance(msg, ListEntitiesRequest):
+            self._log.debug("ListEntitiesRequest received")
+            yield ListEntitiesMediaPlayerResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                supports_pause=True,
+                feature_flags=SUPPORTED_MEDIA_PLAYER_FEATURES,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            self._log.debug("SubscribeHomeAssistantStatesRequest received")
+            yield self._get_state_message()
+        else:
+            self._log.warning("Unknown message type received: %s", type(msg))
+
+    def _update_state(self, new_state: MediaPlayerState) -> MediaPlayerStateResponse:
+        self._log.debug("SET NEW STATE: %s => %s", self.state, new_state)
+        self._log.debug("SET NEW STATE: %s => %s", self.state.name, new_state.name)
+        self.state = new_state
+        return self._get_state_message()
+
+    def _get_state_message(self) -> MediaPlayerStateResponse:
+        return MediaPlayerStateResponse(
+            key=self.key,
+            state=self.state,
+            volume=self.volume,
+            muted=self.muted,
+        )
+
+    def apply_volume_from_state(self, volume: float) -> None:
+        """Synchronize the local volume with the stored state without persisting."""
+
+        clamped = max(0.0, min(1.0, float(volume)))
+
+        if self.muted:
+            self.previous_volume = clamped
+            return
+
+        self._apply_volume(clamped, persist=False)
+
+    def set_volume_callback(self, callback: Optional[Callable[[float], None]]) -> None:
+        """Update the callback invoked when the volume changes."""
+
+        self._on_volume_changed = callback
+
+    def _apply_volume(
+        self,
+        volume: float,
+        *,
+        persist: bool,
+        remember: bool = True,
+    ) -> None:
+        normalized = max(0.0, min(1.0, float(volume)))
+        volume_percent = int(round(normalized * 100))
+
+        self.music_player.set_volume(volume_percent)
+        self.announce_player.set_volume(volume_percent)
+
+        self.volume = normalized
+
+        if remember:
+            self.previous_volume = normalized
+
+        if self._on_volume_changed and persist:
+            self._on_volume_changed(normalized)
+
+
+# -----------------------------------------------------------------------------
+
+
+class MuteSwitchEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_muted: Callable[[], bool],
+        set_muted: Callable[[bool], None],
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self._get_muted = get_muted
+        self._set_muted = set_muted
+        self._switch_state = self._get_muted()  # Sync internal state with actual muted value on init
+
+    def update_set_muted(self, set_muted: Callable[[bool], None]) -> None:
+        # Update the callback used to change the mute state.
+        self._set_muted = set_muted
+
+    def update_get_muted(self, get_muted: Callable[[], bool]) -> None:
+        # Update the callback used to read the mute state.
+        self._get_muted = get_muted
+
+    def sync_with_state(self) -> None:
+        # Sync internal switch state with the actual mute state.
+        self._switch_state = self._get_muted()
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, SwitchCommandRequest) and (msg.key == self.key):
+            # User toggled the switch - update our internal state and trigger actions
+            new_state = bool(msg.state)
+            self._switch_state = new_state
+            self._set_muted(new_state)
+            # Return the new state immediately
+            yield SwitchStateResponse(key=self.key, state=self._switch_state)
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesSwitchResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                entity_category=EntityCategory.CONFIG,
+                icon="mdi:microphone-off",
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            # Always return our internal switch state
+            self.sync_with_state()
+            yield SwitchStateResponse(key=self.key, state=self._switch_state)
+
+
+class ThinkingSoundEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_thinking_sound_enabled: Callable[[], bool],
+        set_thinking_sound_enabled: Callable[[bool], None],
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self._get_thinking_sound_enabled = get_thinking_sound_enabled
+        self._set_thinking_sound_enabled = set_thinking_sound_enabled
+        self._switch_state = self._get_thinking_sound_enabled()  # Sync internal state
+
+    def update_get_thinking_sound_enabled(self, get_thinking_sound_enabled: Callable[[], bool]) -> None:
+        # Update the callback used to read the thinking sound enabled state.
+        self._get_thinking_sound_enabled = get_thinking_sound_enabled
+
+    def update_set_thinking_sound_enabled(self, set_thinking_sound_enabled: Callable[[bool], None]) -> None:
+        # Update the callback used to change the thinking sound enabled state.
+        self._set_thinking_sound_enabled = set_thinking_sound_enabled
+
+    def sync_with_state(self) -> None:
+        # Sync internal switch state with the actual thinking sound enabled state.
+        self._switch_state = self._get_thinking_sound_enabled()
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, SwitchCommandRequest) and (msg.key == self.key):
+            # User toggled the switch - update our internal state and trigger actions
+            new_state = bool(msg.state)
+            self._switch_state = new_state
+            self._set_thinking_sound_enabled(new_state)
+            # Return the new state immediately
+            yield SwitchStateResponse(key=self.key, state=self._switch_state)
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesSwitchResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                entity_category=EntityCategory.CONFIG,
+                icon="mdi:music-note",
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            # Always return our internal switch state
+            self.sync_with_state()
+            yield SwitchStateResponse(key=self.key, state=self._switch_state)
+
+
+class MicSettingEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_value: Callable[[], Union[float, str]],
+        set_value: Callable[[Union[float, str]], None],
+        min_value: float = 0.0,
+        max_value: float = 1.0,
+        options: Optional[List[str]] = None,
+        icon: str = "mdi:microphone",
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.options = options  # If present, this behaves as a Dropdown
+        self.min_value = min_value
+        self.max_value = max_value
+        self._get_value = get_value
+        self._set_value = set_value
+        self._state = self._get_value()
+        self.icon = icon
+
+    def sync_with_state(self) -> None:
+        """Sync internal state with the actual value."""
+        self._state = self._get_value()
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        # --- 1. HANDLE COMMANDS FROM HOME ASSISTANT ---
+        if self.options:
+            if isinstance(msg, SelectCommandRequest) and (msg.key == self.key):
+                new_val = msg.state
+                self._state = new_val
+                self._set_value(new_val)
+                yield SelectStateResponse(key=self.key, state=new_val)
+        else:
+            if isinstance(msg, NumberCommandRequest) and (msg.key == self.key):
+                new_val = msg.state
+                self._state = new_val
+                self._set_value(new_val)
+                yield NumberStateResponse(key=self.key, state=new_val)
+
+        # --- 2. DISCOVERY (TELL HA WHAT TYPE TO SHOW) ---
+        if isinstance(msg, ListEntitiesRequest):
+            if self.options:
+                yield ListEntitiesSelectResponse(
+                    object_id=self.object_id,
+                    key=self.key,
+                    name=self.name,
+                    options=self.options,
+                    entity_category=EntityCategory.CONFIG,
+                    icon=self.icon,
+                )
+            else:
+                yield ListEntitiesNumberResponse(
+                    object_id=self.object_id,
+                    key=self.key,
+                    name=self.name,
+                    min_value=self.min_value,
+                    max_value=self.max_value,
+                    step=1.0,
+                    entity_category=EntityCategory.CONFIG,
+                    icon=self.icon,
+                )
+
+        # --- 3. INITIAL SYNC / STATE UPDATES ---
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            self.sync_with_state()
+            if self.options:
+                yield SelectStateResponse(key=self.key, state=str(self._state))
+            else:
+                yield NumberStateResponse(key=self.key, state=float(self._state))
+
+    def update_get_value(self, get_value: Callable[[], Union[float, str]]) -> None:
+        self._get_value = get_value
+
+    def update_set_value(self, set_value: Callable[[Union[float, str]], None]) -> None:
+        self._set_value = set_value
+
+
+# -----------------------------------------------------------------------------
+
+
+class WakeWord1SensitivityNumberEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_sensitivity: Callable[[], float],
+        set_sensitivity: Callable[[float], None],
+        initial_value: float = 0.5,
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self._get_sensitivity = get_sensitivity
+        self._set_sensitivity = set_sensitivity
+        self.value = initial_value
+        self._log = logging.getLogger(f"{self.__class__.__name__}[{self.key}]")
+
+    def update_get_sensitivity(self, get_sensitivity: Callable[[], float]) -> None:
+        self._get_sensitivity = get_sensitivity
+
+    def update_set_sensitivity(self, set_sensitivity: Callable[[float], None]) -> None:
+        self._set_sensitivity = set_sensitivity
+
+    def sync_with_state(self) -> None:
+        old_value = self.value
+        self.value = self._get_sensitivity()
+        self._log.debug("Entity synchronized: old=%.3f new=%.3f", old_value, self.value)
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, NumberCommandRequest) and (msg.key == self.key):
+            new_value = float(msg.state)
+            self._log.debug("Sensitivity value changed: %s => %s", self.value, new_value)
+            self.value = new_value
+            self._set_sensitivity(new_value)
+            yield NumberStateResponse(key=self.key, state=self.value)
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesNumberResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                entity_category=EntityCategory.CONFIG,
+                min_value=0.0,
+                max_value=1.0,
+                step=0.001,
+                mode=NumberMode.BOX,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            self.sync_with_state()
+            yield NumberStateResponse(key=self.key, state=self.value)
+
+
+class WakeWord2SensitivityNumberEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_sensitivity: Callable[[], float],
+        set_sensitivity: Callable[[float], None],
+        initial_value: float = 0.5,
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self._get_sensitivity = get_sensitivity
+        self._set_sensitivity = set_sensitivity
+        self.value = initial_value
+        self._log = logging.getLogger(f"{self.__class__.__name__}[{self.key}]")
+
+    def update_get_sensitivity(self, get_sensitivity: Callable[[], float]) -> None:
+        self._get_sensitivity = get_sensitivity
+
+    def update_set_sensitivity(self, set_sensitivity: Callable[[float], None]) -> None:
+        self._set_sensitivity = set_sensitivity
+
+    def sync_with_state(self) -> None:
+        old_value = self.value
+        self.value = self._get_sensitivity()
+        self._log.debug("Entity synchronized: old=%.3f new=%.3f", old_value, self.value)
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, NumberCommandRequest) and (msg.key == self.key):
+            new_value = float(msg.state)
+            self._log.debug("Second wake word sensitivity value changed: %s => %s", self.value, new_value)
+            self.value = new_value
+            self._set_sensitivity(new_value)
+            yield NumberStateResponse(key=self.key, state=self.value)
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesNumberResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                entity_category=EntityCategory.CONFIG,
+                min_value=0.0,
+                max_value=1.0,
+                step=0.001,
+                mode=NumberMode.BOX,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            self.sync_with_state()
+            yield NumberStateResponse(key=self.key, state=self.value)
+
+
+class StopWordSensitivityNumberEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_sensitivity: Callable[[], float],
+        set_sensitivity: Callable[[float], None],
+        initial_value: float = 0.5,
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self._get_sensitivity = get_sensitivity
+        self._set_sensitivity = set_sensitivity
+        self.value = initial_value
+        self._log = logging.getLogger(f"{self.__class__.__name__}[{self.key}]")
+
+    def update_get_sensitivity(self, get_sensitivity: Callable[[], float]) -> None:
+        self._get_sensitivity = get_sensitivity
+
+    def update_set_sensitivity(self, set_sensitivity: Callable[[float], None]) -> None:
+        self._set_sensitivity = set_sensitivity
+
+    def sync_with_state(self) -> None:
+        old_value = self.value
+        self.value = self._get_sensitivity()
+        self._log.debug("Entity synchronized: old=%.3f new=%.3f", old_value, self.value)
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, NumberCommandRequest) and (msg.key == self.key):
+            new_value = float(msg.state)
+            self._log.debug("Stop word sensitivity value changed: %s => %s", self.value, new_value)
+            self.value = new_value
+            self._set_sensitivity(new_value)
+            yield NumberStateResponse(key=self.key, state=self.value)
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesNumberResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                entity_category=EntityCategory.CONFIG,
+                icon="mdi:hand-back-left",
+                min_value=0.0,
+                max_value=1.0,
+                step=0.001,
+                mode=NumberMode.BOX,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            self.sync_with_state()
+            yield NumberStateResponse(key=self.key, state=self.value)
+
+
+class LEDLightEntity(ESPHomeEntity):
+    """RGB Light entity for peripheral LEDs.
+
+    The peripheral declares its capabilities (effects, RGB, brightness)
+    via the register_light command. When Home Assistant changes the
+    entity, on_changed fires so the peripheral API server can broadcast
+    a light_command event back to the peripheral, which applies the
+    new state to its hardware.
+    """
+
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        effects: Optional[List[str]] = None,
+        supports_rgb: bool = True,
+        supports_brightness: bool = True,
+        on_changed: Optional[Callable[[], None]] = None,
+        icon: str = "mdi:led-strip-variant",
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.icon = icon
+        self._on_changed = on_changed
+        self.effects_list: List[str] = list(effects) if effects else []
+        self._supports_rgb = supports_rgb
+        self._supports_brightness = supports_brightness
+
+        # Off by default, matching the HA Voice PE LED Ring
+        # (restore_mode RESTORE_DEFAULT_OFF): the resting LEDs stay dark
+        # until the user turns the light on. Voice animations are driven
+        # separately by the peripheral and play regardless.
+        self.is_on: bool = False
+        # Match the HA Voice PE LED Ring initial state: a light blue at 66%
+        # brightness (red 9.4%, green 73.3%, blue 94.9%).
+        self.brightness: float = 0.66
+        self.red: float = 0.094
+        self.green: float = 0.733
+        self.blue: float = 0.949
+        # Default effect: first declared, or empty if none.
+        self.effect: str = self.effects_list[0] if self.effects_list else ""
+
+    def update_on_changed(self, on_changed: Optional[Callable[[], None]]) -> None:
+        self._on_changed = on_changed
+
+    def _color_mode(self) -> ColorMode:
+        if self._supports_rgb:
+            return ColorMode.RGB
+        if self._supports_brightness:
+            return ColorMode.BRIGHTNESS
+        return ColorMode.ON_OFF
+
+    def state_dict(self) -> dict:
+        """Payload for the light_command event.
+
+        Includes object_id so a peripheral that registered more than one
+        Light can route the event to the right hardware.
+        """
+        return {
+            "object_id": self.object_id,
+            "state": self.is_on,
+            "brightness": self.brightness,
+            "red": self.red,
+            "green": self.green,
+            "blue": self.blue,
+            "effect": self.effect,
+        }
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, LightCommandRequest) and msg.key == self.key:
+            changed = False
+            if msg.has_state:
+                self.is_on = bool(msg.state)
+                changed = True
+            if msg.has_brightness and self._supports_brightness:
+                self.brightness = max(0.0, min(1.0, float(msg.brightness)))
+                changed = True
+            if msg.has_rgb and self._supports_rgb:
+                self.red = max(0.0, min(1.0, float(msg.red)))
+                self.green = max(0.0, min(1.0, float(msg.green)))
+                self.blue = max(0.0, min(1.0, float(msg.blue)))
+                changed = True
+            if msg.has_effect:
+                requested = str(msg.effect)
+                if requested in self.effects_list:
+                    self.effect = requested
+                    changed = True
+            if changed and self._on_changed is not None:
+                self._on_changed()
+            yield self._state_response()
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesLightResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                supported_color_modes=[int(self._color_mode())],
+                effects=self.effects_list,
+                icon=self.icon,
+                entity_category=EntityCategory.CONFIG,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            yield self._state_response()
+
+    def _state_response(self) -> LightStateResponse:
+        return LightStateResponse(
+            key=self.key,
+            state=self.is_on,
+            brightness=self.brightness,
+            color_mode=int(self._color_mode()),
+            color_brightness=self.brightness,
+            red=self.red,
+            green=self.green,
+            blue=self.blue,
+            effect=self.effect,
+        )
+
+
+class ButtonEventSensorEntity(ESPHomeEntity):
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.event_types = ["single_press", "double_press", "triple_press", "long_press"]
+        self._current_event: Optional[str] = None
+        self._log = logging.getLogger(f"{self.__class__.__name__}[{self.key}]")
+
+    def update_state(self, event_type: str) -> None:
+        """Update the event state with a button press event."""
+        self._current_event = event_type
+        self._log.debug("Button event state updated: %s", event_type)
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesEventResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                device_class="button",
+                event_types=self.event_types,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            # Wait until a press fires: yielding with an empty
+            # event_type makes HA reject the state and fail the
+            # whole ESPHome config entry to load.
+            if self._current_event:
+                yield self._get_state_message()
+
+    def _get_state_message(self) -> EventResponse:
+        return EventResponse(
+            key=self.key,
+            event_type=self._current_event or "",
+        )
+
+
+class ButtonLockEntity(ESPHomeEntity):
+    """Switch entity for disabling a peripheral's on-board buttons.
+
+    Registered by a peripheral via register_button_lock, mirroring the
+    opt-in pattern used by register_light. LVA only exposes the switch
+    in Home Assistant and owns its state; it has no opinion on what
+    "locked" means for the hardware. When Home Assistant changes the
+    switch, on_changed fires so the peripheral API server can broadcast
+    a button_lock_changed event back to the peripheral, which decides
+    whether to keep executing button-triggered commands.
+    """
+
+    def __init__(
+        self,
+        server: APIServer,
+        key: int,
+        name: str,
+        object_id: str,
+        get_locked: Callable[[], bool],
+        set_locked: Callable[[bool], None],
+        icon: str = "mdi:button-pointer",
+    ) -> None:
+        ESPHomeEntity.__init__(self, server)
+        self.key = key
+        self.name = name
+        self.object_id = object_id
+        self.icon = icon
+        self._get_locked = get_locked
+        self._set_locked = set_locked
+        self._switch_state = self._get_locked()  # Sync internal state with actual value on init
+
+    def update_get_locked(self, get_locked: Callable[[], bool]) -> None:
+        self._get_locked = get_locked
+
+    def update_set_locked(self, set_locked: Callable[[bool], None]) -> None:
+        self._set_locked = set_locked
+
+    def sync_with_state(self) -> None:
+        self._switch_state = self._get_locked()
+
+    def handle_message(self, msg: message.Message) -> Iterable[message.Message]:
+        if isinstance(msg, SwitchCommandRequest) and (msg.key == self.key):
+            new_state = bool(msg.state)
+            self._switch_state = new_state
+            self._set_locked(new_state)
+            yield SwitchStateResponse(key=self.key, state=self._switch_state)
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesSwitchResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                entity_category=EntityCategory.CONFIG,
+                icon=self.icon,
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            self.sync_with_state()
+            yield SwitchStateResponse(key=self.key, state=self._switch_state)
+
+
+# Backward compatibility export aliases
+__all__ = [
+    "ESPHomeEntity",
+    "MediaPlayerEntity",
+    "MuteSwitchEntity",
+    "ThinkingSoundEntity",
+    "LEDLightEntity",
+    "ButtonEventSensorEntity",
+    "ButtonLockEntity",
+    "WakeWord1SensitivityNumberEntity",
+    "WakeWord2SensitivityNumberEntity",
+    "StopWordSensitivityNumberEntity",
+    # Old class names for backward compatibility
+    "WakeWordSensitivityNumberEntity",
+    "SecondWakeWordSensitivityNumberEntity",
+]
+
+WakeWordSensitivityNumberEntity = WakeWord1SensitivityNumberEntity
+SecondWakeWordSensitivityNumberEntity = WakeWord2SensitivityNumberEntity
+
+
+# -----------------------------------------------------------------------------

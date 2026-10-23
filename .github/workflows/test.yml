@@ -1,0 +1,19 @@
+name: Test and package
+on: [push, pull_request, workflow_dispatch]
+jobs:
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: sudo apt-get update && sudo apt-get install -y libmpv-dev libpulse0
+      - uses: astral-sh/setup-uv@v6
+      - run: uv pip install --system -e '.[test]'
+      - run: python -m pytest -q
+      - run: ruff check reachy_mini_ha_voice tests
+      - run: python -m build
+      - run: reachy-mini-app-assistant check .
+      - name: Check vendored Linux runtime imports
+        run: PYTHONPATH=reachy_mini_ha_voice/vendor/lva python -c 'import linux_voice_assistant.__main__'

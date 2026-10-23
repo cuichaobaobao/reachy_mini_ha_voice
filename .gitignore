@@ -1,0 +1,12 @@
+__pycache__/
+*.egg-info/
+build/.work/
+.env
+config.json
+preferences.json
+__pycache__/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
