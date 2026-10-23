@@ -24,7 +24,7 @@ license: apache-2.0
 1. 机器人系统需有可用的 PulseAudio/PipeWire 音频服务及 `libmpv`。若缺少播放库，在机器人终端执行 `sudo apt-get update && sudo apt-get install libmpv2 libpulse0 gstreamer1.0-pulseaudio gstreamer1.0-plugins-good gstreamer1.0-libav`（旧版 Debian 可使用 `libmpv1`）。应用不会自行提权安装系统包。
 2. 在 Reachy Mini 官方 Dashboard 应用安装界面使用 Hugging Face Space `lichao622/reachy_mini_ha_voice` 安装，然后启动。若应用列表尚未更新，使用 Dashboard 支持的 Hugging Face 自定义应用来源安装；这是社区应用，不代表官方审核认证。
 3. 确保机器人和 HA 在同一可通信局域网。在 HA「设置 → 设备与服务」接受发现的 ESPHome 设备，选择已配置好 STT/对话代理/TTS 的 Assist 流水线。无需在应用中填写 HA 地址或访问令牌。
-4. 说 **Okay Nabu** 唤醒。监听时保持安静姿态，思考时轻微摆头，说话时由实际 TTS 音频驱动头部摆动，播放结束后平滑转入空闲呼吸。空闲 0.3 秒后用 1 秒过渡，随后头部上下 ±5 mm（0.1 Hz，每分钟 6 次），天线反向摆动 ±15°（0.5 Hz），参数采用官方对话应用的 BreathingMove；监听时冻结天线并抑制呼吸，保留 daemon 头部追踪（需机器人系统支持）。
+4. 说 **Okay Nabu** 唤醒。监听时保持安静姿态，思考时轻微摆头，说话时由实际 TTS 音频驱动头部摆动，播放结束后平滑转入空闲呼吸。空闲 0.3 秒后用 1 秒过渡，随后头部上下 ±5 mm（0.1 Hz，每分钟 6 次），天线反向摆动 ±15°（0.5 Hz），参数采用官方对话应用的 BreathingMove；监听时冻结天线并抑制呼吸，头部追踪默认关闭（可配置开启，需机器人系统支持）。
 
 若自动发现不可用，可在 HA 的 ESPHome 集成中手动输入**机器人 IP，端口 6053**。请勿将该端口转发到公网。语音状态内部接口仅绑定 `127.0.0.1:6055`。
 
@@ -49,12 +49,15 @@ curl -X POST http://ROBOT_IP:8000/api/apps/install \
 ```json
 {
   "name": "Reachy Mini HA Voice",
+  "head_tracking": false,
   "wake_model": "okay_nabu",
   "audio_input_device": "ReSpeaker",
   "audio_output_device": "pulse/default",
   "network_interface": "wlan0"
 }
 ```
+
+`head_tracking` 默认为 `false`，仅显式设为 `true` 才启用头部追踪。
 
 只填需要覆盖的键；设备名称和网卡名称需符合你的机器人系统。唤醒词也可在 HA 设备页中配置。
 

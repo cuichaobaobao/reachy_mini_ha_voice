@@ -8,3 +8,5 @@ Publish GitHub first, then mirror the tested source to Hugging Face. Do not incl
 
 ## 0.2.0 audio-driven motion
 User approved actual TTS PCM driving official HeadWobbler, frozen listening antennas with breathing suppressed and tracking retained; thinking unchanged. Implement a GStreamer URL player preserving LVA completion callbacks, music stays mpv. Validate real PCM/DSP/EOS/interruption in Linux CI; user performs hardware acceptance.
+
+0.2.1: User requests head tracking off by default. Explicitly disable on startup unless config head_tracking is true; bundled microWakeWord models retained.

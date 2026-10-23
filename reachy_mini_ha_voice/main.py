@@ -47,7 +47,10 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             reachy_mini.goto_target(
                 head=create_head_pose(), antennas=[0, 0], duration=1.0
             )
-            reachy_mini.start_head_tracking(weight=1.0)
+            if settings.get("head_tracking", False) is True:
+                reachy_mini.start_head_tracking(weight=1.0)
+            else:
+                reachy_mini.stop_head_tracking()
             previous = time.monotonic()
             while not stop_event.is_set():
                 if process.poll() is not None:
