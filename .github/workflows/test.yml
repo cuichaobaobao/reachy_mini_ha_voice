@@ -9,8 +9,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Use Ubuntu archive for system dependencies
-        run: sudo sed -i 's|http://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' /etc/apt/sources.list.d/ubuntu.sources
-      - run: sudo apt-get update && sudo apt-get install -y libmpv-dev libpulse0 pulseaudio libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pulseaudio gstreamer1.0-plugins-good gstreamer1.0-libav
+        run: |
+          sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' \) -exec sed -i -E 's|https?://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' {} +
+      - run: sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y libmpv-dev libpulse0 pulseaudio libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pulseaudio gstreamer1.0-plugins-good gstreamer1.0-libav
       - uses: astral-sh/setup-uv@v6
       - run: uv pip install --system -e '.[test]'
       - run: python -m pytest -q
