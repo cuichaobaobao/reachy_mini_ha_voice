@@ -53,7 +53,7 @@ def start_voice(data_dir, settings):
         )
     data_dir.mkdir(parents=True, exist_ok=True)
     environment = os.environ.copy()
-    environment["PYTHONPATH"] = str(VENDOR)
+    environment["PYTHONPATH"] = os.pathsep.join((str(VENDOR), str(VENDOR.parents[2])))
     environment["PYTHONUNBUFFERED"] = "1"
     return subprocess.Popen(command(data_dir, settings), cwd=VENDOR, env=environment)
 

@@ -47,6 +47,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             reachy_mini.goto_target(
                 head=create_head_pose(), antennas=[0, 0], duration=1.0
             )
+            reachy_mini.start_head_tracking(weight=1.0)
             previous = time.monotonic()
             while not stop_event.is_set():
                 if process.poll() is not None:
@@ -79,6 +80,8 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             if reader.is_alive():
                 reader.join(timeout=5)
             if awake:
+                reachy_mini.stop_head_tracking()
+                reachy_mini.disable_wobbling()
                 reachy_mini.goto_target(
                     head=create_head_pose(), antennas=[0, 0], duration=1.0
                 )

@@ -20,6 +20,7 @@ from pyopen_wakeword import OpenWakeWord, OpenWakeWordFeatures
 
 from .models import Preferences, ServerState, WakeWordType, initial_stop_word_threshold
 from .mpv_player import MpvMediaPlayer
+from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
 from .peripheral_api import LVAEvent, PeripheralAPIServer
 from .satellite import VoiceSatelliteProtocol
 from .util import (
@@ -437,7 +438,7 @@ async def main() -> None:
         active_wake_words=active_wake_words,
         stop_word=stop_model,
         music_player=MpvMediaPlayer(device=args.music_output_device or args.audio_output_device),
-        tts_player=MpvMediaPlayer(device=args.audio_output_device),
+        tts_player=ReachyTtsPlayer(device=args.audio_output_device),
         wakeup_sound=args.wakeup_sound,
         start_listening_sound=args.start_listening_sound,
         timer_finished_sound=args.timer_finished_sound,
@@ -597,6 +598,7 @@ async def main() -> None:
     except KeyboardInterrupt:
         pass
     finally:
+        state.tts_player.close()
         state.audio_queue.put_nowait(None)
         process_audio_thread.join()
         if peripheral_api is not None:

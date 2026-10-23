@@ -141,3 +141,11 @@ def test_official_idle_breathing_and_wake_freeze():
         motion.sample(110 + i / 30, 1 / 30)
         assert abs(motion.z) <= 0.005 + 1e-9
         assert all(math.isfinite(x) for x in motion.pose)
+
+
+def test_speaking_has_no_synthetic_oscillation():
+    motion = Motion()
+    motion.event({"event": "tts_speaking"})
+    for now in (0, 1, 2, 10):
+        assert motion.sample(now, 1 / 30) == (0,) * 5
+        assert motion.z == 0

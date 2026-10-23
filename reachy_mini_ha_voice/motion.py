@@ -58,20 +58,12 @@ class Motion:
         self._idle_started = None
         self._idle_origin = None
         if self.state == "listening":
-            return tuple(self.pose)  # No motor noise during recognition.
+            return tuple(self.pose)  # Freeze base/antennas; daemon tracking stays active.
         self.z += max(
             -0.01 * min(max(dt, 0), 0.05), min(0.01 * min(max(dt, 0), 0.05), -self.z)
         )
         target = [0.0] * 5
-        if self.state == "speaking":
-            target = [
-                2 * math.sin(now * 3.1),
-                4 * math.sin(now * 5.3),
-                5 * math.sin(now * 1.7),
-                12 * math.sin(now * 2.7),
-                -12 * math.sin(now * 2.7),
-            ]
-        elif self.state == "thinking":
+        if self.state == "thinking":
             target = [3 * math.sin(now), -3, 4 * math.sin(now * 0.7), -15, 15]
         # Limit velocity even after a delayed tick; continuously blend transitions.
         step = 25 * min(max(dt, 0), 0.05)
