@@ -87,8 +87,8 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                                 logging.getLogger(__name__).info(
                                     "Listening measured antennas: right %.2f°, left %.2f°",
                                     math.degrees(antennas[0]), math.degrees(antennas[1]))
-                            except (ConnectionError, AssertionError, TypeError, ValueError, IndexError):
-                                pass
+                            except Exception as exc:  # noqa: BLE001 - diagnostic SDK reads cannot stop voice
+                                logging.getLogger(__name__).warning("Listening telemetry unavailable: %s", exc)
                         heading.event(message, now)
                     except Empty:
                         break
@@ -102,11 +102,12 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                         reachy_mini.stop_head_tracking()
                     tracking = want_tracking
                 head, antennas = motion.sample(now)
-                link.send(
+                if link.send(
                     head=with_heading(head, facing),
                     antennas=list(antennas),
                     body_yaw=math.radians(facing),
-                )
+                ):
+                    motion.command_sent(antennas)
                 stop_event.wait(tick_delay(now, time.monotonic()))
         finally:
             reader_stop.set()

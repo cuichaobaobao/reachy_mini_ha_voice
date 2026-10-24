@@ -41,6 +41,7 @@ class Motion:
         self._move = self._queued_move = None
         self._move_started = None
         self._last_activity = None
+        self._last_commanded_antennas = self.antennas
         self._frozen_antennas = self.antennas
         self._blend = 1.0
         self._last_blend_time = None
@@ -73,10 +74,17 @@ class Motion:
             self._last_activity = self._last_blend_time = now
             self._blend = 0.0
             if self.state == "listening":
-                self._frozen_antennas = self.antennas
+                self._frozen_antennas = self._last_commanded_antennas
                 _LOG.info("Listening antenna freeze: right %.2f°, left %.2f°",
-                          *map(math.degrees, self.antennas))
+                          *map(math.degrees, self._frozen_antennas))
             # Upstream does not cancel/reset an already queued/running breath.
+
+    def command_sent(self, antennas):
+        """Remember only targets for which SDK set_target returned successfully.
+
+        This is not a hardware acknowledgement, matching the official manager.
+        """
+        self._last_commanded_antennas = tuple(antennas)
 
     def sample(self, now):
         self._now = now
@@ -97,7 +105,7 @@ class Motion:
                     raise ValueError("Invalid feedback pose")
                 self._queued_move = BreathingMove(head.copy(), tuple(antennas), 1.0)
                 self._last_activity = now
-            except (ConnectionError, AssertionError, TypeError, ValueError, IndexError) as exc:
+            except Exception as exc:  # noqa: BLE001 - match upstream motion fault isolation
                 # Like upstream: keep the last target and retry when feedback returns.
                 _LOG.warning("Cannot start breathing from feedback: %s", exc)
         target_antennas = self.antennas

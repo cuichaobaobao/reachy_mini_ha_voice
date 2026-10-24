@@ -19,6 +19,8 @@ class MotionLink:
         self._next_retry = 0.0
         self._stop = threading.Event()
         self._thread = None
+        self._last_target_error = float("-inf")
+        self._target_errors_suppressed = 0
 
     def send(self, **target):
         try:
@@ -38,6 +40,18 @@ class MotionLink:
                 self._next_retry = now + 5
                 self._thread = threading.Thread(target=self._reconnect, name='sdk-motion-reconnect', daemon=True)
                 self._thread.start()
+            return False
+        except Exception as error:  # noqa: BLE001 - match upstream motion fault isolation
+            # Match official set_target isolation. Non-transport errors do not
+            # justify replacing the SDK connection or restarting audio.
+            now = self.clock()
+            if now - self._last_target_error >= 1.0:
+                _LOG.error("Failed to set robot target: %s (suppressed %d repeats)",
+                           error, self._target_errors_suppressed)
+                self._last_target_error = now
+                self._target_errors_suppressed = 0
+            else:
+                self._target_errors_suppressed += 1
             return False
         if self._failed_at is not None:
             _LOG.info("SDK motion recovered after %.2fs; voice worker remained running", self.clock() - self._failed_at)

@@ -100,5 +100,5 @@ class Heading:
             head = math.degrees(math.atan2(pose[1][0], pose[0][0]))
             body = math.degrees(joints[0])
             _LOG.info("Wake turn measured: target %.1f°, head %.1f°, body %.1f°", target, head, body)
-        except (AssertionError, OSError, TypeError, ValueError, IndexError):
-            _LOG.info("Wake turn measured: telemetry unavailable")
+        except Exception as exc:  # noqa: BLE001 - diagnostic SDK reads cannot stop voice
+            _LOG.info("Wake turn measured: telemetry unavailable: %s", exc)

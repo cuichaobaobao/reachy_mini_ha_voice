@@ -1,6 +1,8 @@
 from types import SimpleNamespace
 from unittest.mock import Mock
 
+import pytest
+
 from reachy_mini_ha_voice.motion_link import MotionLink
 
 
@@ -29,4 +31,19 @@ def test_persistent_outage_reconnects_only_sdk_client():
     assert robot.client is new
     old.disconnect.assert_called_once()
     new.wait_for_connection.assert_called_once_with(timeout=3)
+    link.close()
+
+
+@pytest.mark.parametrize('error', [RuntimeError, KeyError])
+def test_other_sdk_target_errors_are_isolated_and_throttled(error, caplog):
+    robot = Mock()
+    robot.set_target.side_effect = [error('bad target'), error('bad target'), None]
+    factory = Mock()
+    link = MotionLink(robot, factory=factory, clock=lambda: 10)
+    assert link.send(head='pose') is False
+    assert link.send(head='pose') is False
+    assert link.send(head='pose') is True
+    assert sum('Failed to set robot target' in r.message for r in caplog.records) == 1
+    factory.assert_not_called()
+    robot.media.close.assert_not_called()
     link.close()

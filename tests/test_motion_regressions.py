@@ -63,7 +63,8 @@ def official_manager(read_pose):
 
 @pytest.mark.parametrize('listening_windows', [[], [(2, 5)], [(0, 2)], [(0.3, 1)],
                                                 [(19 / 60, 2)], [(2, 2.2), (2.3, 3), (5, 6)]])
-def test_frames_match_upstream_lifecycle(listening_windows):
+@pytest.mark.parametrize('failed_sends', [False, True])
+def test_frames_match_upstream_lifecycle(listening_windows, failed_sends):
     # Include rotation and x/y translation: old implementation discarded these.
     feedback = (create_head_pose(x=.002, y=-.003, z=.004, roll=7, pitch=-4, yaw=12), (-.3, .22))
     motion = Motion(lambda: feedback)
@@ -81,10 +82,12 @@ def test_frames_match_upstream_lifecycle(listening_windows):
         official._update_primary_motion(now)
         head, antennas, body = official._get_primary_pose(now)
         antennas = official._calculate_blended_antennas(antennas)
-        official._last_commanded_pose = (head, antennas, body)
         actual_head, actual_antennas = motion.sample(now)
         np.testing.assert_allclose(actual_head, head, atol=1e-12, rtol=0)
         np.testing.assert_allclose(actual_antennas, antennas, atol=1e-12, rtol=0)
+        if not (failed_sends and (90 <= frame < 180 or 310 <= frame < 350)):
+            official._last_commanded_pose = (head, antennas, body)
+            motion.command_sent(actual_antennas)
         samples.append((actual_head[2, 3], actual_antennas))
     if listening_windows == [(2, 5)]:
         assert samples[150][0] != samples[210][0]  # Existing z breath continues.
@@ -105,11 +108,12 @@ def test_official_zero_centred_steady_waveform():
         assert head[2, 3] == pytest.approx(.005 * np.sin(.2 * np.pi * phase))
 
 
-def test_feedback_failure_holds_then_retries_without_resetting_running_breath():
+@pytest.mark.parametrize('error', [ConnectionError, RuntimeError, KeyError])
+def test_feedback_failure_holds_then_retries_without_resetting_running_breath(error):
     feedback = (create_head_pose(z=.003), (-.23, .21))
     def read():
         if not ready[0]:
-            raise ConnectionError('no telemetry')
+            raise error('no telemetry')
         return feedback
     ready = [False]
     motion = Motion(read)
@@ -162,3 +166,26 @@ def test_breathing_class_body_is_unchanged_upstream_code():
     local = ast.parse(inspect.getsource(BreathingMove)).body[0]
     # No parent Move needed in the adapter; every statement of the body is identical.
     assert [ast.dump(n) for n in local.body] == [ast.dump(n) for n in upstream.body]
+
+
+@pytest.mark.parametrize('error', [KeyboardInterrupt, SystemExit])
+def test_feedback_does_not_swallow_process_exit(error):
+    def read():
+        raise error()
+    motion = Motion(read)
+    motion.sample(0)
+    with pytest.raises(error):
+        motion.sample(.5)
+
+
+def test_listening_freezes_last_successful_command_not_last_calculation():
+    motion = Motion()
+    motion.sample(0)
+    motion.sample(.3)
+    motion.sample(.4)
+    _, sent = motion.sample(1.6)
+    motion.command_sent(sent)
+    _, unsent = motion.sample(1.9)
+    assert unsent != sent
+    motion.event({'event': 'listening'}, 2)
+    assert motion.sample(2)[1] == sent

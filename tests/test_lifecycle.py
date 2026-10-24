@@ -114,3 +114,45 @@ def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monke
         assert math.degrees(math.atan2(frame['head'][1, 0], frame['head'][0, 0])) == pytest.approx(expected)
         assert frame['body_yaw'] == pytest.approx(math.radians(expected))
     assert robot.goto_target.call_args.kwargs['body_yaw'] == 0.0
+
+
+@pytest.mark.parametrize('error', [ConnectionError, RuntimeError, KeyError])
+def test_failed_motor_send_keeps_voice_loop_and_last_successful_freeze(
+    app_module, monkeypatch, tmp_path, error
+):
+    from reachy_mini.utils import create_head_pose
+
+    monkeypatch.setenv('REACHY_HA_DATA_DIR', str(tmp_path))
+    worker = Mock()
+    worker.poll.return_value = None
+    monkeypatch.setattr(app_module, 'start_voice', lambda *_: worker)
+    stop_voice = Mock()
+    monkeypatch.setattr(app_module, 'stop_voice', stop_voice)
+    queue = app_module.Queue()
+    monkeypatch.setattr(app_module, 'Queue', lambda: queue)
+    async def reader(*_):
+        return
+    monkeypatch.setattr(app_module, 'events', reader)
+    ticks = iter(t for now in [0, .3, .4, 1.6, 1.9, 2, 2.1] for t in (now, now))
+    monkeypatch.setattr(app_module, 'time', SimpleNamespace(monotonic=lambda: next(ticks)))
+    stop = Mock()
+    stop.is_set.return_value = False
+    robot = Mock()
+    robot.get_current_head_pose.return_value = create_head_pose()
+    # Also exercise diagnostic feedback failure at listening entry.
+    robot.get_current_joint_positions.side_effect = [(None, [-.1745, .1745]), RuntimeError('telemetry')]
+    frames = []
+    def send(**target):
+        frames.append(target)
+        if len(frames) == 5:
+            queue.put({'event': 'listening'})
+            raise error('injected failure')
+        if len(frames) == 7:
+            stop.is_set.return_value = True
+        stop_voice.assert_not_called()
+    robot.set_target.side_effect = send
+    app_module.ReachyMiniHaVoice().run(robot, stop)
+    assert frames[4]['antennas'] != frames[3]['antennas']
+    assert frames[5]['antennas'] == frames[3]['antennas']
+    assert frames[6]['antennas'] == frames[3]['antennas']
+    stop_voice.assert_called_once_with(worker)
