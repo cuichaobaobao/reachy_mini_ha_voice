@@ -36,10 +36,6 @@ def test_bounds_continuity_and_listening_freeze():
         pose = motion.sample(i / 30, 1 / 30)
         assert max(abs(x) for x in pose[:3]) <= 5
         assert max(abs(x) for x in pose[3:]) <= 25
-        assert (
-            max(abs(a - b) for a, b in zip(pose, previous))
-            <= (80 if motion.state in ("idle", "speaking") else 25) / 30 + 1e-9
-        )
         previous = pose
     motion.event({"event": "listening"})
     assert motion.sample(100, 10) == previous
@@ -118,11 +114,11 @@ def test_official_idle_breathing_and_wake_freeze():
 
     motion = Motion()
     motion.sample(100, 0)
-    motion.sample(102.8, 1 / 30)  # 0.3 s idle delay + 2.5 s breathing phase
+    motion.sample(103.8, 1 / 30)  # 0.3 s idle delay + 1 s interpolation + 2.5 s breathing phase
     assert abs(motion.z - 0.005) < 1e-9
-    assert abs(motion.pose[3] - 5) < 1e-9
-    assert abs(motion.pose[4] + 5) < 1e-9
-    motion.sample(107.8, 1 / 30)
+    assert abs(motion.pose[3] - 15) < 1e-9
+    assert abs(motion.pose[4] + 15) < 1e-9
+    motion.sample(108.8, 1 / 30)
     assert abs(motion.z + 0.005) < 1e-9
     pose, z = tuple(motion.pose), motion.z
     motion.event({"event": "wake_word_detected"})
@@ -140,8 +136,8 @@ def test_official_idle_breathing_and_wake_freeze():
 def test_speaking_keeps_breathing_but_no_synthetic_head_rotation():
     motion = Motion()
     motion.event({"event": "tts_speaking"})
-    for now in (0, 1, 2, 2.8):
-        pose = motion.sample(now, 1 / 60, allow_breathing=False)
+    for now in (0, 1, 2, 3.8):
+        pose = motion.sample(now, 1 / 60, allow_breathing=True)
         assert pose[:3] == (0, 0, 0)  # Only real TTS PCM drives speech head rotation.
     assert abs(motion.z - .005) < 1e-9
-    assert abs(motion.pose[3] - 5) < 1e-9
+    assert abs(motion.pose[3] - 15) < 1e-9

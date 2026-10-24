@@ -120,6 +120,14 @@ async def main():
                 f"ESPHome handshake successful: {info.name}, {len(entities)} entities"
             )
             await first_announcement(client)
+            # Three-minute connected run, repeated real playback and fresh API
+            # requests. No disconnect before stop: exercise production cleanup.
+            for cycle in range(6):
+                await asyncio.sleep(30)
+                assert child.returncode is None, child.returncode
+                await client.device_info()
+                await first_announcement(client)
+            print("180-second connected LVA/audio soak passed; 7 announcements completed")
             import json
 
             from websockets.client import connect
@@ -130,7 +138,7 @@ async def main():
                 assert snapshot["data"]["ha_connected"]
                 print("Peripheral snapshot confirms connected HA-compatible client")
         finally:
-            await client.disconnect()
+            # Keep HA connected during shutdown: this used to deadlock wait_closed.
             # Also exercise shutdown after the upstream peripheral startup wait.
             await asyncio.sleep(2.5)
             child.terminate()
@@ -140,6 +148,7 @@ async def main():
                 child.kill()
                 await child.wait()
                 raise AssertionError("LVA required SIGKILL instead of clean shutdown")
+            await client.disconnect()
             assert child.returncode == 0, child.returncode
 
 

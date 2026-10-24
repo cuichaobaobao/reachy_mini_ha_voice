@@ -25,3 +25,4 @@ jobs:
           python scripts/smoke_linux.py
           python scripts/smoke_tts.py
           python scripts/smoke_direction.py
+          python scripts/smoke_motion_link.py

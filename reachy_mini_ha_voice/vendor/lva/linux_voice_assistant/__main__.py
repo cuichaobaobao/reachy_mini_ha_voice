@@ -585,6 +585,7 @@ async def run_voice(owner, argv=None, robot=None) -> None:
     # ------------------------------------------------------------------
     # Start peripheral API and signal "getting started" to peripherals
     # ------------------------------------------------------------------
+    serving = None
     try:
         await discovery.register_server()
         if peripheral_api is not None:
@@ -605,13 +606,27 @@ async def run_voice(owner, argv=None, robot=None) -> None:
                 )
                 await asyncio.sleep(args.peripheral_startup_wait)
 
-        async with server:  # type: ignore[union-attr]
-            _LOGGER.info("Server started (host=%s, port=%s)", host_ip_address, args.port)
-            await asyncio.gather(server.serve_forever(), mic.task)
+        _LOGGER.info("Server started (host=%s, port=%s)", host_ip_address, args.port)
+        # Do not use Server.__aexit__: it waits for clients before our finally
+        # can close their transports (Python 3.12).
+        serving = asyncio.create_task(server.serve_forever())
+        # wait() does not propagate cancellation into serve_forever(), whose
+        # own cancellation handler waits for connected clients on Python 3.12.
+        done, _ = await asyncio.wait((serving, mic.task), return_when=asyncio.FIRST_COMPLETED)
+        for completed in done:
+            await completed
     except KeyboardInterrupt:
         pass
     finally:
         server.close()
+        # Python 3.12 waits for accepted sockets too. HA stays connected while
+        # the app stops; close those sockets before waiting for server closure.
+        for connection in tuple(state.connections):
+            if connection._transport is not None:
+                connection._transport.close()
+        if serving is not None:
+            serving.cancel()
+            await asyncio.gather(serving, return_exceptions=True)
         await server.wait_closed()
         mic.closed.set()
         state.wake_direction_reader.close()

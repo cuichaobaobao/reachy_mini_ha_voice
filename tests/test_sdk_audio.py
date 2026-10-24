@@ -40,3 +40,16 @@ def test_unsupported_channel_contract_fails_explicitly():
     audio = recorder([])
     with pytest.raises(ValueError), audio.recorder(samplerate=16000, channels=2, blocksize=320):
         pass
+
+
+def test_wobbler_connection_loss_is_cosmetic_not_audio_failure(monkeypatch):
+    import sys
+    from types import ModuleType
+    protocol = ModuleType('reachy_mini.io.protocol')
+    protocol.SetSpeechOffsetsCmd = lambda **kwargs: kwargs
+    monkeypatch.setitem(sys.modules, 'reachy_mini.io.protocol', protocol)
+    audio = SdkAudio.__new__(SdkAudio)
+    audio._offset_callback = None
+    audio._robot = Mock()
+    audio._robot.client.send_command.side_effect = ConnectionError('lost heartbeat')
+    audio._offsets([0] * 6)  # Must also allow wobbler.stop() during cleanup.

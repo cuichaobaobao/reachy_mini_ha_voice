@@ -15,6 +15,7 @@ from reachy_mini.utils import create_head_pose
 
 from .heading import Heading
 from .motion import NEUTRAL_ANTENNAS, Motion, tick_delay
+from .motion_link import MotionLink
 from .runtime import events, start_voice, stop_voice
 
 
@@ -33,7 +34,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
         settings = json.loads(config_path.read_text()) if config_path.exists() else {}
         if not isinstance(settings, dict):
             raise TypeError("config.json must contain a JSON object")
-        logging.getLogger("reachy_mini_ha_voice.heading").setLevel(logging.INFO)
+        logging.getLogger("reachy_mini_ha_voice").setLevel(logging.INFO)
         process = start_voice(data_dir, settings, reachy_mini)
         reader_stop = threading.Event()
         queue = Queue()
@@ -42,6 +43,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             name="ha-voice-events",
         )
         motion = Motion()
+        link = MotionLink(reachy_mini)
         heading = Heading()
         awake = False
         try:
@@ -66,7 +68,16 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 for _ in range(100):
                     try:
                         message = queue.get_nowait()
+                        was_listening = motion.state == "listening"
                         motion.event(message)
+                        if motion.state == "listening" and not was_listening:
+                            try:
+                                _, antennas = reachy_mini.get_current_joint_positions()
+                                logging.getLogger(__name__).info(
+                                    "Listening measured antennas: right %.2f°, left %.2f°",
+                                    math.degrees(antennas[0]), math.degrees(antennas[1]))
+                            except (ConnectionError, AssertionError, TypeError, ValueError, IndexError):
+                                pass
                         heading.event(message, now)
                     except Empty:
                         break
@@ -80,9 +91,9 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                         reachy_mini.stop_head_tracking()
                     tracking = want_tracking
                 roll, pitch, yaw, right, left = motion.sample(
-                    now, now - previous, allow_breathing=not heading.active
+                    now, now - previous
                 )
-                reachy_mini.set_target(
+                link.send(
                     head=create_head_pose(
                         z=motion.z,
                         roll=roll,
@@ -100,15 +111,21 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 stop_event.wait(tick_delay(now, time.monotonic()))
         finally:
             reader_stop.set()
-            stop_voice(process)
-            if reader.is_alive():
-                reader.join(timeout=5)
+            link.close()
+            try:
+                stop_voice(process)
+            finally:
+                if reader.is_alive():
+                    reader.join(timeout=5)
             if awake:
-                reachy_mini.stop_head_tracking()
-                reachy_mini.disable_wobbling()
-                reachy_mini.goto_target(
-                    head=create_head_pose(), antennas=[math.radians(a) for a in NEUTRAL_ANTENNAS], body_yaw=0.0, duration=1.0
-                )
+                try:
+                    reachy_mini.stop_head_tracking()
+                    reachy_mini.disable_wobbling()
+                    reachy_mini.goto_target(
+                        head=create_head_pose(), antennas=[math.radians(a) for a in NEUTRAL_ANTENNAS], body_yaw=0.0, duration=1.0
+                    )
+                except ConnectionError:
+                    logging.getLogger(__name__).warning("SDK unavailable at shutdown; neutral command skipped")
 
 
 if __name__ == "__main__":

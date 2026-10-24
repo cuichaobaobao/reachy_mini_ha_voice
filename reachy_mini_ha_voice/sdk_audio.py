@@ -6,6 +6,7 @@ import time
 from contextlib import contextmanager
 
 import numpy as np
+from websockets.exceptions import ConnectionClosed
 
 
 class SdkAudio:
@@ -47,7 +48,12 @@ class SdkAudio:
             self._offset_callback(offsets)
         elif self._robot is not None:
             from reachy_mini.io.protocol import SetSpeechOffsetsCmd
-            self._robot.client.send_command(SetSpeechOffsetsCmd(offsets=list(offsets)))
+            try:
+                self._robot.client.send_command(SetSpeechOffsetsCmd(offsets=list(offsets)))
+            except (ConnectionError, OSError, ConnectionClosed):
+                # Same best-effort policy as SDK enable_wobbling: cosmetic
+                # motion must not kill playback or prevent audio cleanup.
+                pass
 
     @contextmanager
     def recorder(self, samplerate, channels, blocksize):

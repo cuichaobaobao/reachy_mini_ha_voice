@@ -52,7 +52,7 @@ def test_normal_stop_cleans_child_and_returns_neutral(
     assert robot.set_target.call_count == 1
     assert robot.goto_target.call_count == 2
     assert robot.goto_target.call_args.kwargs["antennas"] == pytest.approx(
-        [app_module.math.radians(-10), app_module.math.radians(10)])
+        [-0.1745, 0.1745])
     assert not any(t.name == "ha-voice-events" for t in threading.enumerate())
 
 

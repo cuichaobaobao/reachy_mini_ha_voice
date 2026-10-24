@@ -1,4 +1,4 @@
-"""Recent speech direction captured before LVA plays its wake chime.
+"""Recent direction captured before LVA plays its wake chime.
 
 Uses the active SDK audio owner's DOA when supplied, otherwise the daemon. No network request
 runs on the wake-word/audio thread. A missing/old reading never delays Assist.
@@ -26,6 +26,7 @@ class DirectionReader:
         self.url = url.replace("with_doa=true", "with_doa=false") if doa else url
         self.clock = clock
         self._reading = None
+        self._last_error = "no sample yet"
         self._lock = threading.Lock()
         self._stop = threading.Event()
         self._thread = None
@@ -39,23 +40,33 @@ class DirectionReader:
         try:
             doa, pose = payload["doa"], payload["head_pose"]
             angle, yaw = float(doa["angle"]), float(pose["yaw"])
-            if (doa["speech_detected"] is not True or
-                    not all(map(math.isfinite, (angle, yaw, sampled_at))) or
+            if (not all(map(math.isfinite, (angle, yaw, sampled_at))) or
                     not 0 <= angle <= math.pi):
                 return
-            reading = {"angle": angle, "head_yaw": yaw, "sampled_at": sampled_at}
+            reading = {"angle": angle, "head_yaw": yaw, "sampled_at": sampled_at, "speech_detected": bool(doa["speech_detected"])}
             with self._lock:
                 self._reading = reading
+                self._last_error = None
         except (KeyError, TypeError, ValueError):
             return
 
     def snapshot(self):
         if self.playing():
+            _LOG.info("Wake direction skipped: playback active")
             return {}
         with self._lock:
             reading = self._reading
-        if reading is None or not 0 <= self.clock() - reading["sampled_at"] <= 0.6:
+        if reading is None:
+            _LOG.info("Wake direction skipped: %s", self._last_error)
             return {}
+        age = self.clock() - reading["sampled_at"]
+        if not 0 <= age <= 0.6:
+            _LOG.info("Wake direction skipped: latest sample age %.3fs; last error=%s", age, self._last_error)
+            return {}
+        # Called only after wake-word recognition. A second XMOS VAD gate can
+        # reject the final syllable's direction after the speaker has stopped.
+        _LOG.info("Wake direction snapshot: DOA %.1f°, speech=%s, age %.3fs",
+                  math.degrees(reading["angle"]), reading["speech_detected"], age)
         return {"direction": dict(reading)}
 
     def _run(self):
@@ -82,7 +93,8 @@ class DirectionReader:
                     # Reject a request overlapping audio playback.
                     if not self.playing():
                         self.update(payload, started)
-                except (OSError, ValueError, TypeError, IndexError, AssertionError):
+                except (OSError, ValueError, TypeError, IndexError, AssertionError) as error:
+                    self._last_error = f"{type(error).__name__}: {error}"
                     if not warned:
                         _LOG.warning("Wake direction unavailable; turning skipped until readings recover")
                         warned = True
