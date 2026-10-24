@@ -28,6 +28,7 @@ def test_normal_stop_cleans_child_and_returns_neutral(
     app_module, monkeypatch, tmp_path
 ):
     monkeypatch.setenv("REACHY_HA_DATA_DIR", str(tmp_path))
+    assert app_module.ReachyMiniHaVoice.request_media_backend == "local"
     child = Mock()
     child.poll.return_value = None
     stop_child = Mock()

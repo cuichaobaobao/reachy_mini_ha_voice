@@ -11,6 +11,7 @@ from reachy_mini_ha_voice.sdk_audio import SdkAudio
 def recorder(samples):
     audio = SdkAudio.__new__(SdkAudio)
     audio.backend = Mock()
+    audio.media = audio.backend
     audio.backend.get_audio_sample.side_effect = samples
     audio.closed = threading.Event()
     audio._input = np.empty((0, 1), dtype=np.float32)

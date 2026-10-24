@@ -18,7 +18,7 @@ from .runtime import events, start_voice, stop_voice
 
 
 class ReachyMiniHaVoice(ReachyMiniApp):
-    request_media_backend = "no_media"
+    request_media_backend = "local"
     custom_app_url = None
 
     def run(self, reachy_mini, stop_event):
@@ -32,7 +32,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
         settings = json.loads(config_path.read_text()) if config_path.exists() else {}
         if not isinstance(settings, dict):
             raise TypeError("config.json must contain a JSON object")
-        process = start_voice(data_dir, settings)
+        process = start_voice(data_dir, settings, reachy_mini)
         reader_stop = threading.Event()
         queue = Queue()
         reader = threading.Thread(

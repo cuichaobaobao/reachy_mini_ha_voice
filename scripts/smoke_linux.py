@@ -22,12 +22,7 @@ async def main():
         child = await asyncio.create_subprocess_exec(
             *[
                 sys.executable,
-                "-c",
-                "import runpy, faulthandler; faulthandler.dump_traceback_later(20, repeat=True); "
-                "from virtual_audio import install; install(); "
-                "from reachy_mini_ha_voice.sdk_audio import SdkAudio; "
-                "SdkAudio.connect_motion = lambda self: None; "
-                "runpy.run_module('linux_voice_assistant', run_name='__main__')",
+                str(ROOT / "scripts/run_virtual_voice.py"),
                 "--host",
                 "127.0.0.1",
                 "--network-interface",

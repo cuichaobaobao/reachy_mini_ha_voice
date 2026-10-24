@@ -94,3 +94,8 @@ reachy-mini-app-assistant check .
 源码以 GitHub 为主，完成检查后同步到 Hugging Face。上游源码和资源版本、许可见 `THIRD_PARTY.md`。
 
 0.4.0 音频适配：设备选择由 SDK 管理，旧配置中的 `audio_input_device`、`audio_output_device` 必须移除。TTS 与媒体音频混合后送入 SDK，只有 TTS 音频驱动头部。停止/替换/暂停会清空共享输出队列，录音管线继续工作。播放完成按 SDK 时钟及管线延迟判断，不以下载或解码结束代替。
+
+### 0.5.0：保留视频服务
+应用通过官方 `ReachyMiniApp` 创建一个 `local` SDK 实例。LVA 在可取消的工作线程中共用 `reachy_mini.media`，录音和播放不再另建后端或 `no_media` 客户端。旧版 `no_media` 会让 daemon 释放媒体设备，影响 Dashboard/WebRTC 视频；新版不再请求释放。HA 协议、唤醒词和动作逻辑不变。
+
+SDK 1.12 没有公开的播放排空时钟接口，精确播放结束及 TTS 动作同步仍在适配层使用该版本内部时间戳，因此继续限制 SDK <1.13。虚拟设备测试不能代替真机视频、音频延迟和 HA 全链路验收。

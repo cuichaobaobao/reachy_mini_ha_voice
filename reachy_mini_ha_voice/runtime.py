@@ -1,11 +1,10 @@
-"""Own the upstream LVA process and consume its public peripheral API."""
+"""Own the upstream LVA worker and consume its public peripheral API."""
 
 import asyncio
 import json
 import logging
-import os
-import subprocess
 import sys
+import threading
 from pathlib import Path
 
 from websockets.client import connect
@@ -17,9 +16,6 @@ VENDOR = Path(__file__).parent / "vendor" / "lva"
 
 def command(data_dir, settings):
     args = [
-        sys.executable,
-        "-m",
-        "linux_voice_assistant",
         "--name",
         settings.get("name", "Reachy Mini HA Voice"),
         "--peripheral-host",
@@ -43,24 +39,67 @@ def command(data_dir, settings):
     return args
 
 
-def start_voice(data_dir, settings):
+class VoiceWorker:
+    """One cancellable LVA event loop sharing the application's SDK instance."""
+
+    def __init__(self, args, robot, runner=None):
+        self.returncode = None
+        self._loop = None
+        self._task = None
+        self._stop = threading.Event()
+        self._thread = threading.Thread(
+            target=self._run, args=(args, robot, runner), name="ha-voice-runtime", daemon=True
+        )
+        self._thread.start()
+
+    def _run(self, args, robot, runner):
+        try:
+            if runner is None:
+                if str(VENDOR) not in sys.path:
+                    sys.path.insert(0, str(VENDOR))
+                from linux_voice_assistant.__main__ import main
+                runner = main
+
+            async def run():
+                self._loop = asyncio.get_running_loop()
+                self._task = asyncio.current_task()
+                if self._stop.is_set():
+                    return
+                await runner(argv=args, robot=robot, install_signals=False)
+
+            asyncio.run(run())
+            self.returncode = 0
+        except asyncio.CancelledError:
+            self.returncode = 0
+        except (Exception, SystemExit):  # noqa: BLE001 - report worker failure to app
+            _LOG.exception("LVA worker failed")
+            self.returncode = 1
+
+    def poll(self):
+        return self.returncode
+
+    def stop(self):
+        self._stop.set()
+        loop, task = self._loop, self._task
+        if loop is not None and task is not None:
+            try:
+                loop.call_soon_threadsafe(task.cancel)
+            except RuntimeError:
+                pass  # Loop already finished.
+        self._thread.join(timeout=10)
+        if self._thread.is_alive():
+            raise RuntimeError("LVA worker did not finish cleanup within 10 seconds")
+
+
+def start_voice(data_dir, settings, robot):
     if sys.platform != "linux":
         raise RuntimeError("Voice runtime requires Linux on Reachy Mini Wireless.")
     data_dir.mkdir(parents=True, exist_ok=True)
-    environment = os.environ.copy()
-    environment["PYTHONPATH"] = os.pathsep.join((str(VENDOR), str(VENDOR.parents[2])))
-    environment["PYTHONUNBUFFERED"] = "1"
-    return subprocess.Popen(command(data_dir, settings), cwd=VENDOR, env=environment)
+    return VoiceWorker(command(data_dir, settings), robot)
 
 
-def stop_voice(process):
-    if process.poll() is None:
-        process.terminate()
-        try:
-            process.wait(timeout=8)
-        except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait(timeout=3)
+def stop_voice(worker):
+    worker.stop()
 
 
 async def events(stop, queue):

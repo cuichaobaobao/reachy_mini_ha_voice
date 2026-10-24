@@ -11,28 +11,34 @@ import numpy as np
 class SdkAudio:
     name = "Reachy Mini SDK microphone"
 
-    def __init__(self, backend=None, offset_callback=None):
-        from reachy_mini.media.audio_gstreamer import GStreamerAudio
+    def __init__(self, backend=None, offset_callback=None, robot=None):
         from reachy_mini.motion.head_wobbler import HeadWobbler
 
-        self.backend = backend if backend is not None else GStreamerAudio()
-        self.rate = self.backend.get_output_audio_samplerate()
-        if self.backend.get_input_audio_samplerate() != 16000:
+        self._owns_robot = robot is None and backend is None
+        if self._owns_robot:
+            from reachy_mini import ReachyMini
+            robot = ReachyMini(media_backend="local", connection_mode="localhost_only")
+        self._robot = robot
+        self.media = robot.media if robot is not None else backend
+        self.backend = self.media.audio if robot is not None else backend
+        if self.backend is None:
+            raise RuntimeError("SDK local audio unavailable; check daemon media status")
+        self.rate = self.media.get_output_audio_samplerate()
+        if self.media.get_input_audio_samplerate() != 16000:
             raise RuntimeError("Reachy SDK microphone must supply 16000 Hz audio")
         self.closed = threading.Event()
         self._capture_failed = threading.Event()
         self.players = []
-        self._robot = None
         self._offset_callback = offset_callback
         self.wobbler = HeadWobbler(self._offsets, sample_rate=self.rate)
         self._speech = False
         self._input = np.empty((0, 1), dtype=np.float32)
-        self.backend.start_recording()
-        self.backend.start_playing()
+        self.media.start_recording()
+        self.media.start_playing()
         # Prime the SDK live mixer appsrc so its shared capture pipeline can
         # complete preroll before the first HA response arrives.
-        self.backend.push_audio_sample(np.zeros(
-            (self.rate // 50, self.backend.get_output_channels()), dtype=np.float32
+        self.media.push_audio_sample(np.zeros(
+            (self.rate // 50, self.media.get_output_channels()), dtype=np.float32
         ))
         self.task = asyncio.create_task(self._render())
 
@@ -42,11 +48,6 @@ class SdkAudio:
         elif self._robot is not None:
             from reachy_mini.io.protocol import SetSpeechOffsetsCmd
             self._robot.client.send_command(SetSpeechOffsetsCmd(offsets=list(offsets)))
-
-    def connect_motion(self):
-        if self._offset_callback is None:
-            from reachy_mini import ReachyMini
-            self._robot = ReachyMini(media_backend="no_media", connection_mode="localhost_only")
 
     @contextmanager
     def recorder(self, samplerate, channels, blocksize):
@@ -59,7 +60,7 @@ class SdkAudio:
         while len(self._input) < frames:
             if self.closed.is_set():
                 raise EOFError("SDK audio closed")
-            sample = self.backend.get_audio_sample()
+            sample = self.media.get_audio_sample()
             if sample is None or not np.size(sample):
                 if time.monotonic() > deadline:
                     raise RuntimeError("No microphone audio received from Reachy SDK for 5 seconds")
@@ -120,8 +121,8 @@ class SdkAudio:
                     self._speech = speaking
                 if count:
                     stereo = np.repeat(np.clip(mixed[:count], -1, 1)[:, None],
-                                       self.backend.get_output_channels(), axis=1)
-                    self.backend.push_audio_sample(stereo)
+                                       self.media.get_output_channels(), axis=1)
+                    self.media.push_audio_sample(stereo)
                     end = self.backend._appsrc_pts + latency
                     running, _ = self.clock()
                     start_ns = time.monotonic_ns() + end - running - count * 1_000_000_000 // self.rate
@@ -148,12 +149,13 @@ class SdkAudio:
             for player in tuple(self.players):
                 player.close()
             self.wobbler.stop()
-            self.backend.stop_recording()
-            self.backend.stop_playing()
-            self.backend.cleanup()
+            self.media.stop_recording()
+            self.media.stop_playing()
+            if self._robot is None:
+                self.backend.cleanup()
             # SDK 1.12 cleanup() releases USB; its destructor owns the GLib loop.
-            # Close deterministically, before the child SDK client reacquires media.
+            # Close the audio loop deterministically; never release daemon media.
             self.backend._loop.quit()
             self.backend._thread_bus_calls.join(timeout=3)
-            if self._robot is not None:
+            if self._owns_robot:
                 self._robot.__exit__(None, None, None)

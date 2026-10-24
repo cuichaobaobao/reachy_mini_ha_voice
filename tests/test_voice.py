@@ -74,16 +74,10 @@ def test_assets_and_command(tmp_path):
     assert args[args.index("--audio-input-device") + 1] == "ReSpeaker"
 
 
-def test_child_cleanup():
-    import subprocess
-
-    process = Mock()
-    process.poll.return_value = None
-    process.wait.side_effect = [subprocess.TimeoutExpired("lva", 8), 0]
-    stop_voice(process)
-    process.terminate.assert_called_once()
-    process.kill.assert_called_once()
-    assert process.wait.call_count == 2
+def test_worker_cleanup():
+    worker = Mock()
+    stop_voice(worker)
+    worker.stop.assert_called_once()
 
 
 def test_real_websocket_events_and_shutdown():

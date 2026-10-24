@@ -44,12 +44,13 @@ _SOUNDS_DIR = _REPO_DIR / "sounds"
 # -----------------------------------------------------------------------------
 
 
-async def main() -> None:
+async def main(argv=None, robot=None, install_signals=True) -> None:
     owner = []
     task = asyncio.current_task()
-    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    if install_signals:
+        asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
     try:
-        await run_voice(owner)
+        await run_voice(owner, argv, robot)
     except asyncio.CancelledError:
         pass
     except Exception:
@@ -60,7 +61,7 @@ async def main() -> None:
             await audio.close()
 
 
-async def run_voice(owner) -> None:
+async def run_voice(owner, argv=None, robot=None) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--name",
@@ -266,7 +267,7 @@ async def run_voice(owner) -> None:
         action="store_true",
         help="Enable output only mode",
     )
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
 
     if args.colored_debug:
         args.debug = True
@@ -428,9 +429,8 @@ async def run_voice(owner) -> None:
     stop_model = load_stop_model(wake_word_dirs, args.stop_model)
     assert stop_model is not None
 
-    mic = SdkAudio()
+    mic = SdkAudio(robot=robot)
     owner.append(mic)
-    mic.connect_motion()
     await asyncio.to_thread(mic.record, 320)  # Fail before discovery if capture is unavailable.
 
     state = ServerState(
@@ -571,7 +571,7 @@ async def run_voice(owner) -> None:
     )
     process_audio_thread.start()
 
-    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing, doa=mic.backend.get_DoA)
+    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing, doa=mic.media.get_DoA)
     state.wake_direction_reader.start()
 
     # Auto discovery (zeroconf, mDNS)
@@ -581,36 +581,38 @@ async def run_voice(owner) -> None:
         mac_address=state.mac_address,
         host_ip_address=host_ip_address,
     )
-    await discovery.register_server()
 
     # ------------------------------------------------------------------
     # Start peripheral API and signal "getting started" to peripherals
     # ------------------------------------------------------------------
-    if peripheral_api is not None:
-        await peripheral_api.start()
-        await peripheral_api.emit_event(LVAEvent.ZEROCONF, {"status": "getting_started"})
-
-        # Give peripherals a window to connect and register their Light
-        # entities before HA enumerates over the ESPHome native API. The
-        # ESPHome server is bound but not yet serving (serve_forever runs
-        # below), so any HA connection sits queued in the kernel for the
-        # duration of this wait. Peripherals that register later still
-        # work, but the new entities only show up in HA after the
-        # integration reconnects.
-        if args.peripheral_startup_wait > 0:
-            _LOGGER.info(
-                "Waiting %.1fs for peripherals to register entities…",
-                args.peripheral_startup_wait,
-            )
-            await asyncio.sleep(args.peripheral_startup_wait)
-
     try:
+        await discovery.register_server()
+        if peripheral_api is not None:
+            await peripheral_api.start()
+            await peripheral_api.emit_event(LVAEvent.ZEROCONF, {"status": "getting_started"})
+
+            # Give peripherals a window to connect and register their Light
+            # entities before HA enumerates over the ESPHome native API. The
+            # ESPHome server is bound but not yet serving (serve_forever runs
+            # below), so any HA connection sits queued in the kernel for the
+            # duration of this wait. Peripherals that register later still
+            # work, but the new entities only show up in HA after the
+            # integration reconnects.
+            if args.peripheral_startup_wait > 0:
+                _LOGGER.info(
+                    "Waiting %.1fs for peripherals to register entities…",
+                    args.peripheral_startup_wait,
+                )
+                await asyncio.sleep(args.peripheral_startup_wait)
+
         async with server:  # type: ignore[union-attr]
             _LOGGER.info("Server started (host=%s, port=%s)", host_ip_address, args.port)
             await asyncio.gather(server.serve_forever(), mic.task)
     except KeyboardInterrupt:
         pass
     finally:
+        server.close()
+        await server.wait_closed()
         mic.closed.set()
         state.wake_direction_reader.close()
         state.tts_player.close()
@@ -642,11 +644,12 @@ def _setup_logging(args: argparse.Namespace) -> None:
         color = COLORS.get(record.levelno, RESET)
         return f"{color}{original_format(self, record)}{RESET}"
 
-    logging.Formatter.format = colored_format  # type: ignore
+    class ColorFormatter(logging.Formatter):
+        format = colored_format
 
     handler = logging.StreamHandler()
     handler.setFormatter(
-        logging.Formatter(
+        ColorFormatter(
             fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
             datefmt="%H:%M:%S",
         )

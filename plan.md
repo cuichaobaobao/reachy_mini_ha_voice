@@ -22,3 +22,6 @@ User robot fails due to missing libmpv. Remove runtime dependency and switch mus
 
 ## 0.4.0 SDK audio adapter (approved)
 Replace soundcard/PulseAudio input and direct pulsesink output with one SDK-owned audio backend in the LVA child; parent remains no_media and owns base motion. Preserve upstream wake/HA protocol logic. Use SDK synchronized wobbling and playback clock, bounded decode queues, shared playback mixing, clear_player on interruption and deterministic shutdown. Verify SDK1.12 interfaces against read-only robot source. Add no-Pulse Linux virtual-device integration and unit regressions; publish only after checks. Robot remains read-only.
+
+## 0.5.0 shared public media (approved)
+User approved reachy_mini.media migration and reports broken video. Remove no_media clients: official app owns one local SDK instance, LVA runs a cancellable asyncio worker thread sharing that instance. Public media methods handle capture/output; isolated SDK timing internals remain for audible EOS. Do not release daemon media, change robot settings, or alter HA/wake protocol. Validate worker lifecycle, real LVA handshake and audio with virtual media; hardware video acceptance remains separate.
