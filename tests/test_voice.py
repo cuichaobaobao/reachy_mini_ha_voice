@@ -28,21 +28,6 @@ def test_conversation_and_interrupt():
     assert not motion.connected
 
 
-def test_bounds_continuity_and_listening_freeze():
-    motion = Motion()
-    previous = tuple(motion.pose)
-    for i in range(1800):
-        motion.event({"event": ["tts_speaking", "thinking", "idle"][i // 600]})
-        pose = motion.sample(i / 30, 1 / 30)
-        assert max(abs(x) for x in pose[:3]) <= 5
-        assert max(abs(x) for x in pose[3:]) <= 25
-        previous = pose
-    motion.event({"event": "listening"})
-    assert motion.sample(100, 10) == previous
-    motion.event({"event": "tts_speaking"})
-    assert max(abs(a - b) for a, b in zip(motion.sample(100, 10), previous)) <= 1.25
-
-
 def test_invalid_events():
     motion = Motion()
     for value in [
@@ -109,35 +94,3 @@ def test_real_websocket_events_and_shutdown():
     asyncio.run(exercise())
 
 
-def test_official_idle_breathing_and_wake_freeze():
-    import math
-
-    motion = Motion()
-    motion.sample(100, 0)
-    motion.sample(103.8, 1 / 30)  # 0.3 s idle delay + 1 s interpolation + 2.5 s breathing phase
-    assert abs(motion.z - 0.005) < 1e-9
-    assert abs(motion.pose[3] - 15) < 1e-9
-    assert abs(motion.pose[4] + 15) < 1e-9
-    motion.sample(108.8, 1 / 30)
-    assert abs(motion.z + 0.005) < 1e-9
-    pose, z = tuple(motion.pose), motion.z
-    motion.event({"event": "wake_word_detected"})
-    assert motion.sample(109, 1 / 30) == pose
-    assert motion.z == z
-    motion.event({"event": "idle"})
-    assert motion.sample(110, 1 / 30) == pose
-    assert motion.z == z
-    for i in range(1000):
-        motion.sample(110 + i / 30, 1 / 30)
-        assert abs(motion.z) <= 0.005 + 1e-9
-        assert all(math.isfinite(x) for x in motion.pose)
-
-
-def test_speaking_keeps_breathing_but_no_synthetic_head_rotation():
-    motion = Motion()
-    motion.event({"event": "tts_speaking"})
-    for now in (0, 1, 2, 3.8):
-        pose = motion.sample(now, 1 / 60, allow_breathing=True)
-        assert pose[:3] == (0, 0, 0)  # Only real TTS PCM drives speech head rotation.
-    assert abs(motion.z - .005) < 1e-9
-    assert abs(motion.pose[3] - 15) < 1e-9

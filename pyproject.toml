@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_ha_voice"
-version = "0.6.0"
+version = "0.6.1"
 description = "Home Assistant Assist voice satellite with Reachy Mini gestures"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -39,4 +39,8 @@ reachy_mini_ha_voice = ["vendor/**/*", "static/**/*"]
 testpaths = ["tests"]
 
 [tool.ruff]
-exclude = ["reachy_mini_ha_voice/vendor"]
+exclude = ["reachy_mini_ha_voice/vendor", "tests/fixtures"]
+
+# Preserve the copied upstream class body for exact source/behaviour comparison.
+[tool.ruff.lint.per-file-ignores]
+"reachy_mini_ha_voice/official_breathing.py" = ["UP006", "UP035"]

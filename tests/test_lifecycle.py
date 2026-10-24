@@ -14,10 +14,7 @@ import pytest
 def app_module(monkeypatch):
     sdk = ModuleType("reachy_mini")
     sdk.ReachyMiniApp = type("ReachyMiniApp", (), {})
-    utils = ModuleType("reachy_mini.utils")
-    utils.create_head_pose = lambda **kw: kw
     monkeypatch.setitem(sys.modules, "reachy_mini", sdk)
-    monkeypatch.setitem(sys.modules, "reachy_mini.utils", utils)
     sys.modules.pop("reachy_mini_ha_voice.main", None)
     module = importlib.import_module("reachy_mini_ha_voice.main")
     yield module
@@ -90,12 +87,15 @@ def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monke
     async def reader(*_):
         return
     monkeypatch.setattr(app_module, "events", reader)
-    ticks = iter([0, *[t for now in [0, 1.2, 2, 3, 4, 8, 8.75, 9.5] for t in (now, now)]])
+    ticks = iter([t for now in [0, 1.2, 2, 3, 4, 8, 8.75, 9.5] for t in (now, now)])
     monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
     stop = Mock()
     stop.is_set.return_value = False
     robot = Mock()
     frames = []
+    from reachy_mini.utils import create_head_pose
+    robot.get_current_joint_positions.return_value = (None, [-0.1745, 0.1745])
+    robot.get_current_head_pose.side_effect = lambda: create_head_pose(yaw=direction * 90)
     queue.put({"event": "wake_word_detected", "data": {"direction": {
         "angle": 0.0 if direction == 1 else math.pi, "head_yaw": 0.0, "sampled_at": 0.0,
     }}})
@@ -111,6 +111,6 @@ def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monke
     app_module.ReachyMiniHaVoice().run(robot, stop)
     for frame, expected in zip(frames, [0, 90, 90, 90, 90, 90, 45, 0]):
         expected *= direction
-        assert frame['head']['yaw'] == pytest.approx(expected)
+        assert math.degrees(math.atan2(frame['head'][1, 0], frame['head'][0, 0])) == pytest.approx(expected)
         assert frame['body_yaw'] == pytest.approx(math.radians(expected))
     assert robot.goto_target.call_args.kwargs['body_yaw'] == 0.0

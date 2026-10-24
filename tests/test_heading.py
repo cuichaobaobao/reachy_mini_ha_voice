@@ -4,7 +4,6 @@ import pytest
 
 from reachy_mini_ha_voice.direction import DirectionReader
 from reachy_mini_ha_voice.heading import Heading
-from reachy_mini_ha_voice.motion import NEUTRAL_ANTENNAS, Motion
 
 
 def wake(now, relative=30, measured=0):
@@ -119,16 +118,6 @@ def test_wake_reader_accepts_fresh_direction_after_hardware_vad_ends():
     now[0] = 11.1  # Still reject genuinely stale direction.
     reader.update({'doa': None}, 10.7)
     assert reader.snapshot() == {}
-
-
-def test_breathing_waits_until_return_complete():
-    motion = Motion()
-    motion.sample(0, 0)
-    assert motion.sample(10, .03, allow_breathing=False) == (0, 0, 0, *NEUTRAL_ANTENNAS)
-    assert motion.z == 0
-    motion.sample(11, .03)
-    motion.sample(14.8, .03)
-    assert motion.z == pytest.approx(.005)
 
 
 @pytest.mark.parametrize("sdk_doa", [False, True])

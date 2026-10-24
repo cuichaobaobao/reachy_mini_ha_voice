@@ -14,7 +14,13 @@ from reachy_mini import ReachyMiniApp
 from reachy_mini.utils import create_head_pose
 
 from .heading import Heading
-from .motion import NEUTRAL_ANTENNAS, Motion, tick_delay
+from .motion import (
+    NEUTRAL_ANTENNAS,
+    Motion,
+    relative_to_heading,
+    tick_delay,
+    with_heading,
+)
 from .motion_link import MotionLink
 from .runtime import events, start_voice, stop_voice
 
@@ -42,23 +48,28 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             target=lambda: asyncio.run(events(reader_stop, queue)),
             name="ha-voice-events",
         )
-        motion = Motion()
-        link = MotionLink(reachy_mini)
         heading = Heading()
+        facing = 0.0
+
+        def read_breathing_pose():
+            _, antennas = reachy_mini.get_current_joint_positions()
+            return relative_to_heading(reachy_mini.get_current_head_pose(), facing), antennas
+
+        motion = Motion(read_breathing_pose)
+        link = MotionLink(reachy_mini)
         awake = False
         try:
             reader.start()
             reachy_mini.wake_up()
             awake = True
             reachy_mini.goto_target(
-                head=create_head_pose(), antennas=[math.radians(a) for a in NEUTRAL_ANTENNAS], body_yaw=0.0, duration=1.0
+                head=create_head_pose(), antennas=list(NEUTRAL_ANTENNAS), body_yaw=0.0, duration=1.0
             )
             if settings.get("head_tracking", False) is True:
                 reachy_mini.start_head_tracking(weight=1.0)
             else:
                 reachy_mini.stop_head_tracking()
             tracking = settings.get("head_tracking", False) is True
-            previous = time.monotonic()
             while not stop_event.is_set():
                 if process.poll() is not None:
                     raise RuntimeError(
@@ -69,7 +80,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                     try:
                         message = queue.get_nowait()
                         was_listening = motion.state == "listening"
-                        motion.event(message)
+                        motion.event(message, now)
                         if motion.state == "listening" and not was_listening:
                             try:
                                 _, antennas = reachy_mini.get_current_joint_positions()
@@ -90,24 +101,12 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                     else:
                         reachy_mini.stop_head_tracking()
                     tracking = want_tracking
-                roll, pitch, yaw, right, left = motion.sample(
-                    now, now - previous
-                )
+                head, antennas = motion.sample(now)
                 link.send(
-                    head=create_head_pose(
-                        z=motion.z,
-                        roll=roll,
-                        pitch=pitch,
-                        yaw=yaw + facing,
-                        degrees=True,
-                        mm=False,
-                    ),
-                    antennas=[math.radians(right), math.radians(left)],
-                    # Same world heading for head and body: the neck only carries
-                    # the small gesture offsets. TTS offsets are added by daemon.
+                    head=with_heading(head, facing),
+                    antennas=list(antennas),
                     body_yaw=math.radians(facing),
                 )
-                previous = now
                 stop_event.wait(tick_delay(now, time.monotonic()))
         finally:
             reader_stop.set()
@@ -122,7 +121,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                     reachy_mini.stop_head_tracking()
                     reachy_mini.disable_wobbling()
                     reachy_mini.goto_target(
-                        head=create_head_pose(), antennas=[math.radians(a) for a in NEUTRAL_ANTENNAS], body_yaw=0.0, duration=1.0
+                        head=create_head_pose(), antennas=list(NEUTRAL_ANTENNAS), body_yaw=0.0, duration=1.0
                     )
                 except ConnectionError:
                     logging.getLogger(__name__).warning("SDK unavailable at shutdown; neutral command skipped")

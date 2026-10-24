@@ -1,13 +1,19 @@
-"""Official conversation breathing and listening antenna freeze, in degrees.
+"""Official breathing/listening lifecycle, with acoustic heading kept separate.
 
-Port of BreathingMove.evaluate and the 0.4-second listening blend in upstream
-moves.py. Acoustic heading is composed separately by the app, never here.
+Uses the upstream BreathingMove without changing its waveform. The only primary
+move here is breathing: the conversation app's tool/dance queue is not included.
+All poses are matrices in metres and all antenna angles are radians.
 """
 import logging
 import math
 
+import numpy as np
+from reachy_mini.utils import create_head_pose
+
+from .official_breathing import BreathingMove
+
 CONTROL_LOOP_HZ = 60.0
-NEUTRAL_ANTENNAS = tuple(map(math.degrees, (-0.1745, 0.1745)))
+NEUTRAL_ANTENNAS = (-0.1745, 0.1745)
 _LOG = logging.getLogger(__name__)
 
 
@@ -15,34 +21,44 @@ def tick_delay(started, finished):
     return max(0.0, 1.0 / CONTROL_LOOP_HZ - max(0.0, finished - started))
 
 
-class Motion:
-    def __init__(self):
-        self.state = "idle"
-        self.pose = [0.0, 0.0, 0.0, *NEUTRAL_ANTENNAS]
-        self.connected = False
-        self.z = 0.0
-        self._idle_started = None
-        self._idle_origin = None
-        self._frozen_antennas = NEUTRAL_ANTENNAS
-        self._unfreeze_elapsed = 0.4
+def relative_to_heading(head, heading):
+    """Remove only the application's acoustic yaw from a measured world pose."""
+    return create_head_pose(yaw=-heading) @ head
 
-    def event(self, message):
+
+def with_heading(head, heading):
+    """Keep head and body facing together without replacing breathing/tilt."""
+    return create_head_pose(yaw=heading) @ head
+
+
+class Motion:
+    def __init__(self, read_pose=None):
+        self.state = "idle"
+        self.connected = False
+        self.head = create_head_pose()
+        self.antennas = NEUTRAL_ANTENNAS
+        self._read_pose = read_pose
+        self._move = self._queued_move = None
+        self._move_started = None
+        self._last_activity = None
+        self._frozen_antennas = self.antennas
+        self._blend = 1.0
+        self._last_blend_time = None
+        self._now = 0.0
+
+    def event(self, message, now=None):
         if not isinstance(message, dict):
             return
         event, data = message.get("event"), message.get("data") or {}
         if not isinstance(data, dict):
             return
+        previous = self.state
         if event == "snapshot":
             self.connected = bool(data.get("ha_connected"))
             self.state = "idle"
         elif event == "zeroconf":
             self.connected = data.get("status") == "connected"
         elif event in ("wake_word_detected", "listening"):
-            if self.state != "listening":
-                self._frozen_antennas = tuple(self.pose[3:])
-                self._unfreeze_elapsed = 0.0
-                self._idle_started = self._idle_origin = None
-                _LOG.info("Listening antenna freeze: right %.2f°, left %.2f°", *self._frozen_antennas)
             self.state = "listening"
         elif event == "thinking":
             self.state = "thinking"
@@ -52,33 +68,51 @@ class Motion:
             self.state = "idle"
             if event == "disconnected":
                 self.connected = False
+        if (previous == "listening") != (self.state == "listening"):
+            now = self._now if now is None else now
+            self._last_activity = self._last_blend_time = now
+            self._blend = 0.0
+            if self.state == "listening":
+                self._frozen_antennas = self.antennas
+                _LOG.info("Listening antenna freeze: right %.2f°, left %.2f°",
+                          *map(math.degrees, self.antennas))
+            # Upstream does not cancel/reset an already queued/running breath.
 
-    def sample(self, now, dt, allow_breathing=True):
+    def sample(self, now):
+        self._now = now
+        if self._last_activity is None:
+            self._last_activity = now
+        # Official order: start previously queued move, then schedule idle move.
+        if self._queued_move is not None:
+            self._move, self._queued_move = self._queued_move, None
+            self._move_started = now
+        if self._move is None and self.state != "listening" and now - self._last_activity >= 0.3:
+            try:
+                head, antennas = (self._read_pose() if self._read_pose else (self.head, self.antennas))
+                head = np.asarray(head, dtype=float)
+                antennas = np.asarray(antennas, dtype=float)
+                if head.shape != (4, 4) or antennas.shape != (2,) or not (
+                    np.isfinite(head).all() and np.isfinite(antennas).all()
+                ):
+                    raise ValueError("Invalid feedback pose")
+                self._queued_move = BreathingMove(head.copy(), tuple(antennas), 1.0)
+                self._last_activity = now
+            except (ConnectionError, AssertionError, TypeError, ValueError, IndexError) as exc:
+                # Like upstream: keep the last target and retry when feedback returns.
+                _LOG.warning("Cannot start breathing from feedback: %s", exc)
+        target_antennas = self.antennas
+        if self._move is not None:
+            self.head, target_antennas, _ = self._move.evaluate(now - self._move_started)
+        # Same antenna freeze/blend as MovementManager._calculate_blended_antennas.
+        dt = 0.0 if self._last_blend_time is None else max(0.0, now - self._last_blend_time)
+        self._last_blend_time = now
         if self.state == "listening":
-            return tuple(self.pose)
-        self._unfreeze_elapsed = min(0.4, self._unfreeze_elapsed + max(0.0, dt))
-        target = list(self.pose)
-        if allow_breathing:
-            if self._idle_started is None:
-                self._idle_started = now
-                self._idle_origin = (tuple(self.pose), self.z)
-            elapsed = now - self._idle_started - 0.3
-            origin, origin_z = self._idle_origin
-            if elapsed >= 0:
-                if elapsed < 1.0:
-                    # Official first phase: linear interpolation to neutral.
-                    target = [(1 - elapsed) * a + elapsed * b
-                              for a, b in zip(origin, (0, 0, 0, *NEUTRAL_ANTENNAS))]
-                    self.z = (1 - elapsed) * origin_z
-                else:
-                    phase = elapsed - 1.0
-                    sway = 15.0 * math.sin(2 * math.pi * 0.5 * phase)
-                    target = [0.0, 0.0, 0.0, sway, -sway]
-                    self.z = .005 * math.sin(2 * math.pi * .1 * phase)
+            self.antennas = self._frozen_antennas
+            self._blend = 0.0
         else:
-            self._idle_started = self._idle_origin = None
-        blend = self._unfreeze_elapsed / .4
-        target[3:] = [(1 - blend) * a + blend * b
-                      for a, b in zip(self._frozen_antennas, target[3:])]
-        self.pose = target
-        return tuple(self.pose)
+            self._blend = min(1.0, self._blend + dt / 0.4)
+            self.antennas = tuple(a * (1 - self._blend) + b * self._blend
+                                  for a, b in zip(self._frozen_antennas, target_antennas))
+            if self._blend >= 1.0:
+                self._frozen_antennas = tuple(target_antennas)
+        return self.head.copy(), self.antennas
