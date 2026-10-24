@@ -95,6 +95,13 @@ async def main():
                 music.play(str(path), lambda: calls.append('stopped'))
                 music.stop()
                 assert calls == ['stopped']
+                speech_done, music_done = asyncio.Event(), asyncio.Event()
+                before = len(offsets)
+                player.play(str(path), speech_done.set)
+                music.play(str(path), music_done.set)
+                await asyncio.wait_for(asyncio.gather(speech_done.wait(), music_done.wait()), 10)
+                assert any(any(abs(x) > 1e-8 for x in item) for item in offsets[before:])
+                assert (await asyncio.to_thread(audio.record, 320)).shape == (320, 1)
             finally:
                 music.close()
             assert not audio.task.done()

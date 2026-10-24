@@ -89,12 +89,16 @@ async def main():
                 print("Peripheral snapshot confirms connected HA-compatible client")
         finally:
             await client.disconnect()
+            # Also exercise shutdown after the upstream peripheral startup wait.
+            await asyncio.sleep(2.5)
             child.terminate()
             try:
                 await asyncio.wait_for(child.wait(), 10)
             except TimeoutError:
                 child.kill()
                 await child.wait()
+                raise AssertionError("LVA required SIGKILL instead of clean shutdown")
+            assert child.returncode == 0, child.returncode
 
 
 asyncio.run(main())
