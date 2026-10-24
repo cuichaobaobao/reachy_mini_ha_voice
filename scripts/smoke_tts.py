@@ -21,6 +21,7 @@ async def main():
     # has started. Older player.take() closed this pipeline on its first poll.
     from gi.repository import Gst
     from unittest.mock import Mock
+    Gst.init(None)
     cold_audio = SimpleNamespace(players=[], rate=16000, flush=Mock())
     cold = ReachyTtsPlayer(cold_audio)
     cold._pipeline = Gst.Pipeline.new("cold-regression")
