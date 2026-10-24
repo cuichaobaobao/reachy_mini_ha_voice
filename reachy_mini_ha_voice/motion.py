@@ -110,8 +110,9 @@ class Motion:
                     _LOG.info("Listening antenna freeze: right %.2f°, left %.2f°",
                               math.degrees(raw[0]), math.degrees(raw[1]))
             else:
-                # Leaving mid-adjustment must start the unfreeze from what was sent.
-                self._frozen_antennas = tuple(self.antennas)
+                # Unfreeze from what the robot actually received: a frame that
+                # failed to send must not become the blend origin.
+                self._frozen_antennas = tuple(self._last_commanded_antennas)
             # Upstream does not cancel/reset an already queued/running breath.
 
     def command_sent(self, antennas):

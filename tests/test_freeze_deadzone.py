@@ -82,20 +82,33 @@ def test_unfreeze_begins_from_the_adjusted_bias():
     motion = breathing_motion()
     motion.command_sent((0.0, 0.0))
     motion.event({'event': 'listening'}, 2.0)
-    motion.sample(2.0 + FREEZE_ADJUST_SECONDS)
+    _, adjusted = motion.sample(2.0 + FREEZE_ADJUST_SECONDS)
+    motion.command_sent(adjusted)  # the adjusted frame reached the robot
     motion.event({'event': 'thinking'}, 2.0 + FREEZE_ADJUST_SECONDS)
     _, antennas = motion.sample(2.0 + FREEZE_ADJUST_SECONDS)
     np.testing.assert_allclose(antennas, (-FREEZE_BIAS, FREEZE_BIAS), atol=1e-12)
 
 
-def test_leaving_mid_adjustment_does_not_jump():
+def test_leaving_mid_adjustment_after_successful_sends_starts_from_current_value():
     motion = breathing_motion()
     motion.command_sent((DEG(7), -DEG(7)))
     motion.event({'event': 'listening'}, 2.0)
     _, midway = motion.sample(2.1)
+    motion.command_sent(midway)  # main sends this frame successfully
     motion.event({'event': 'thinking'}, 2.1)
     _, after = motion.sample(2.1)
     np.testing.assert_allclose(after, midway, atol=1e-12)
+
+
+def test_leaving_mid_adjustment_after_failed_sends_starts_from_last_delivered_value():
+    raw = (DEG(7), -DEG(7))
+    motion = breathing_motion()
+    motion.command_sent(raw)
+    motion.event({'event': 'listening'}, 2.0)
+    motion.sample(2.1)  # computed ~9.6°, but this frame never reached the robot
+    motion.event({'event': 'thinking'}, 2.1)
+    _, after = motion.sample(2.1)
+    np.testing.assert_allclose(after, raw, atol=1e-12)
 
 
 def test_deadzone_bias_keeps_left_right_symmetry():
