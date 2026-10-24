@@ -16,14 +16,15 @@ VENDOR = ROOT / "reachy_mini_ha_voice/vendor/lva"
 async def main():
     assert ctypes.util.find_library("mpv") is None, "Regression must run without libmpv"
     assert not __import__("subprocess").run(["pgrep", "-x", "pulseaudio"], capture_output=True).returncode == 0
-    print("No PulseAudio server or libmpv; real SDK ALSA + LVA startup")
+    print("No PulseAudio server or libmpv; real SDK pipeline with virtual endpoints + LVA startup")
     with tempfile.TemporaryDirectory(prefix="ha-voice-smoke-") as directory:
-        env = dict(os.environ, PYTHONPATH=str(VENDOR), PYTHONUNBUFFERED="1")
+        env = dict(os.environ, PYTHONPATH=os.pathsep.join((str(VENDOR), str(ROOT / "scripts"))), PYTHONUNBUFFERED="1")
         child = await asyncio.create_subprocess_exec(
             *[
                 sys.executable,
                 "-c",
                 "import runpy, faulthandler; faulthandler.dump_traceback_later(20, repeat=True); "
+                "from virtual_audio import install; install(); "
                 "from reachy_mini_ha_voice.sdk_audio import SdkAudio; "
                 "SdkAudio.connect_motion = lambda self: None; "
                 "runpy.run_module('linux_voice_assistant', run_name='__main__')",

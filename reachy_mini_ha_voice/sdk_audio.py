@@ -60,14 +60,14 @@ class SdkAudio:
             if self.closed.is_set():
                 raise EOFError("SDK audio closed")
             sample = self.backend.get_audio_sample()
-            if sample is None:
+            if sample is None or not np.size(sample):
                 if time.monotonic() > deadline:
                     raise RuntimeError("No microphone audio received from Reachy SDK for 5 seconds")
                 self.closed.wait(.005)
                 continue
             # SDK/XMOS channel 0 is the processed microphone; never mix channel 1
             # into it or advertise an unverified second-channel AEC reference to HA.
-            sample = np.asarray(sample, dtype=np.float32)
+            sample = np.nan_to_num(np.asarray(sample, dtype=np.float32), nan=0.0, posinf=1.0, neginf=-1.0)
             sample = sample.reshape(-1, 1) if sample.ndim == 1 else sample[:, :1]
             self._input = np.concatenate((self._input, sample))
         result, self._input = self._input[:frames], self._input[frames:]

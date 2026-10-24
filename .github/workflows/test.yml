@@ -20,12 +20,8 @@ jobs:
       - run: ruff check reachy_mini_ha_voice tests
       - run: python -m build
       - run: reachy-mini-app-assistant check .
-      - name: Test SDK ALSA audio without PulseAudio and real ESPHome runtime
+      - name: Test SDK audio without PulseAudio and real ESPHome runtime
         run: |
-          cat > ~/.asoundrc <<'EOF'
-          pcm.reachymini_audio_src { type null }
-          pcm.reachymini_audio_sink { type null }
-          EOF
           python scripts/smoke_linux.py
           python scripts/smoke_tts.py
           python scripts/smoke_direction.py

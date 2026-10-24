@@ -11,11 +11,12 @@ from pathlib import Path
 import numpy as np
 from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
 from reachy_mini_ha_voice.sdk_audio import SdkAudio
+from virtual_audio import VirtualAudio
 
 
 async def main():
     offsets = []
-    audio = SdkAudio(offset_callback=offsets.append)
+    audio = SdkAudio(backend=VirtualAudio(), offset_callback=offsets.append)
     player = ReachyTtsPlayer(audio)
     captured = await asyncio.to_thread(audio.record, 320)
     assert captured.shape == (320, 1)
