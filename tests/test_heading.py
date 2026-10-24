@@ -130,7 +130,8 @@ def test_breathing_waits_until_return_complete():
     assert motion.z == pytest.approx(.005)
 
 
-def test_real_daemon_http_polling_playback_suppression_and_cleanup():
+@pytest.mark.parametrize("sdk_doa", [False, True])
+def test_real_daemon_http_polling_playback_suppression_and_cleanup(sdk_doa):
     import json
     import threading
     import time
@@ -143,7 +144,7 @@ def test_real_daemon_http_polling_playback_suppression_and_cleanup():
             self.send_response(200)
             self.end_headers()
             self.wfile.write(json.dumps({
-                'doa': {'angle': math.pi / 4, 'speech_detected': True},
+                'doa': None if sdk_doa else {'angle': math.pi / 4, 'speech_detected': True},
                 'head_pose': {'yaw': .3},
             }).encode())
 
@@ -154,7 +155,8 @@ def test_real_daemon_http_polling_playback_suppression_and_cleanup():
     thread = threading.Thread(target=server.serve_forever)
     thread.start()
     reader = DirectionReader(playing=lambda: playing[0],
-                             url=f'http://127.0.0.1:{server.server_port}/api/state/full')
+                             url=f'http://127.0.0.1:{server.server_port}/api/state/full',
+                             doa=(lambda: (math.pi / 4, True)) if sdk_doa else None)
     try:
         reader.start()
         for _ in range(100):

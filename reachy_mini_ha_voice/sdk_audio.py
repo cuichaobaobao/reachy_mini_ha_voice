@@ -29,6 +29,11 @@ class SdkAudio:
         self._input = np.empty((0, 1), dtype=np.float32)
         self.backend.start_recording()
         self.backend.start_playing()
+        # Prime the SDK live mixer appsrc so its shared capture pipeline can
+        # complete preroll before the first HA response arrives.
+        self.backend.push_audio_sample(np.zeros(
+            (self.rate // 50, self.backend.get_output_channels()), dtype=np.float32
+        ))
         self.task = asyncio.create_task(self._render())
 
     def _offsets(self, offsets):

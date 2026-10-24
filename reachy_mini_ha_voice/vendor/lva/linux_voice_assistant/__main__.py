@@ -50,6 +50,11 @@ async def main() -> None:
     asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
     try:
         await run_voice(owner)
+    except asyncio.CancelledError:
+        pass
+    except Exception:
+        _LOGGER.exception("Voice runtime failed")
+        raise
     finally:
         for audio in owner:
             await audio.close()
@@ -81,7 +86,7 @@ async def run_voice(owner) -> None:
     )
     parser.add_argument(
         "--music-output-device",
-        help="PulseAudio name for the music/media output device (defaults to --audio-output-device)",
+        help="Legacy device override (unsupported; SDK manages audio devices)",
     )
     parser.add_argument(
         "--list-output-devices",
@@ -566,7 +571,7 @@ async def run_voice(owner) -> None:
     )
     process_audio_thread.start()
 
-    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing)
+    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing, doa=mic.backend.get_DoA)
     state.wake_direction_reader.start()
 
     # Auto discovery (zeroconf, mDNS)

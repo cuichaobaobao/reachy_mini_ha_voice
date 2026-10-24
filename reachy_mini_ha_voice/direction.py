@@ -1,6 +1,6 @@
 """Recent speech direction captured before LVA plays its wake chime.
 
-Uses the daemon's USB owner, not another recording device. No network request
+Uses the active SDK audio owner's DOA when supplied, otherwise the daemon. No network request
 runs on the wake-word/audio thread. A missing/old reading never delays Assist.
 """
 
@@ -19,9 +19,10 @@ URL = (
 
 
 class DirectionReader:
-    def __init__(self, playing=lambda: False, url=URL, clock=time.monotonic):
+    def __init__(self, playing=lambda: False, url=URL, clock=time.monotonic, doa=None):
         self.playing = playing
-        self.url = url
+        self.doa = doa
+        self.url = url.replace("with_doa=true", "with_doa=false") if doa else url
         self.clock = clock
         self._reading = None
         self._lock = threading.Lock()
@@ -67,6 +68,12 @@ class DirectionReader:
                     started = self.clock()
                     with self._opener.open(self.url, timeout=0.3) as response:
                         payload = json.loads(response.read(65536))
+                    if self.doa is not None:
+                        direction = self.doa()
+                        payload["doa"] = (
+                            {"angle": direction[0], "speech_detected": direction[1]}
+                            if direction is not None else None
+                        )
                     # Reject a request overlapping audio playback.
                     if not self.playing():
                         self.update(payload, started)

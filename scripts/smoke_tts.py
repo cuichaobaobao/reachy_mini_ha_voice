@@ -2,6 +2,7 @@
 import asyncio
 import tempfile
 import threading
+import time
 from functools import partial
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 import wave
@@ -36,8 +37,10 @@ async def main():
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
+                started = time.monotonic()
                 player.play(f"http://127.0.0.1:{server.server_port}/speech.wav", done.set)
                 await asyncio.wait_for(done.wait(), 10)
+                assert time.monotonic() - started >= 1.8, "EOS fired before audible PCM drained"
             finally:
                 server.shutdown()
                 server.server_close()
