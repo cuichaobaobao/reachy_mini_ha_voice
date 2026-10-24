@@ -75,8 +75,11 @@ class Heading:
                     target = max(-self.BODY_YAW_LIMIT, min(self.BODY_YAW_LIMIT, measured_yaw + relative))
                     duration = max(0.65, min(1.25, abs(target - self.yaw) / 75.0))
                     _LOG.info("Wake turn: DOA %.1f°, relative %.1f°, measured head %.1f°, "
-                              "head/body target %.1f°, sample age %.3fs, duration %.2fs",
-                              math.degrees(angle), relative, measured_yaw, target, age, duration)
+                              "head/body target %.1f°, sample age %.3fs, duration %.2fs, "
+                              "direction=%s(%s samples, spread %.1f°)",
+                              math.degrees(angle), relative, measured_yaw, target, age, duration,
+                              reading.get("source", "instant"), reading.get("samples", 1),
+                              reading.get("spread", 0.0))
                     self._turn(target, now, duration)
                     self._report = (now + duration + 0.3, target)
                 except (KeyError, TypeError, ValueError):

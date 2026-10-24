@@ -2,13 +2,18 @@
 
 Uses the active SDK audio owner's DOA when supplied, otherwise the daemon. No network request
 runs on the wake-word/audio thread. A missing/old reading never delays Assist.
-"""
 
+The array's raw angle is noisy (single-sample jumps of tens of degrees, 0/pi wraparound),
+so a wake snapshot is the circular median of the last SPEECH_WINDOW seconds of speech
+samples, falling back to all recent samples when the hardware VAD never flagged the word.
+"""
 import json
 import logging
 import math
+import statistics
 import threading
 import time
+from collections import deque
 from urllib.request import ProxyHandler, build_opener
 
 _LOG = logging.getLogger(__name__)
@@ -16,6 +21,26 @@ URL = (
     "http://127.0.0.1:8000/api/state/full?with_doa=true"
     "&with_control_mode=false&with_body_yaw=false&with_antenna_positions=false"
 )
+SPEECH_WINDOW = 0.4
+SAMPLE_LIMIT = 64
+
+
+def _unwrap(values, period):
+    ref = values[0]
+    return [ref + ((value - ref + period / 2) % period) - period / 2 for value in values]
+
+
+def circular_median(values, period):
+    """Median on a circle; period is pi for DOA and 2*pi for a yaw."""
+    unwrapped = _unwrap(values, period)
+    if max(unwrapped) - min(unwrapped) < 1e-12:
+        return values[0]
+    return statistics.median(unwrapped) % period
+
+
+def _spread_degrees(angles):
+    unwrapped = _unwrap(angles, math.pi)
+    return math.degrees(max(unwrapped) - min(unwrapped))
 
 
 class DirectionReader:
@@ -25,7 +50,7 @@ class DirectionReader:
         self.pose = pose
         self.url = url.replace("with_doa=true", "with_doa=false") if doa else url
         self.clock = clock
-        self._reading = None
+        self._samples = deque(maxlen=SAMPLE_LIMIT)
         self._last_error = "no sample yet"
         self._lock = threading.Lock()
         self._stop = threading.Event()
@@ -45,7 +70,7 @@ class DirectionReader:
                 return
             reading = {"angle": angle, "head_yaw": yaw, "sampled_at": sampled_at, "speech_detected": bool(doa["speech_detected"])}
             with self._lock:
-                self._reading = reading
+                self._samples.append(reading)
                 self._last_error = None
         except (KeyError, TypeError, ValueError):
             return
@@ -54,27 +79,44 @@ class DirectionReader:
         if self.playing():
             _LOG.info("Wake direction skipped: playback active")
             return {}
+        now = self.clock()
         with self._lock:
-            reading = self._reading
-        if reading is None:
+            recent = [s for s in self._samples if 0 <= now - s["sampled_at"] <= SPEECH_WINDOW]
+        if not recent:
             _LOG.info("Wake direction skipped: %s", self._last_error)
             return {}
-        age = self.clock() - reading["sampled_at"]
-        if not 0 <= age <= 0.6:
-            _LOG.info("Wake direction skipped: latest sample age %.3fs; last error=%s", age, self._last_error)
-            return {}
-        # Called only after wake-word recognition. A second XMOS VAD gate can
-        # reject the final syllable's direction after the speaker has stopped.
-        _LOG.info("Wake direction snapshot: DOA %.1f°, speech=%s, age %.3fs",
-                  math.degrees(reading["angle"]), reading["speech_detected"], age)
-        return {"direction": dict(reading)}
+        speech = [s for s in recent if s["speech_detected"]]
+        pool = speech or recent
+        angle = circular_median([s["angle"] for s in pool], math.pi)
+        yaw = circular_median([s["head_yaw"] for s in pool], 2 * math.pi)
+        if yaw > math.pi:
+            yaw -= 2 * math.pi
+        elif yaw < -math.pi:
+            yaw += 2 * math.pi
+        newest = max(pool, key=lambda s: s["sampled_at"])
+        source = "speech" if speech else "recent"
+        spread = _spread_degrees([s["angle"] for s in pool])
+        direction = {
+            "angle": angle,
+            "head_yaw": yaw,
+            "sampled_at": newest["sampled_at"],
+            "speech_detected": newest["speech_detected"],
+            "source": source,
+            "samples": len(pool),
+            "spread": spread,
+        }
+        _LOG.info("Wake direction snapshot: DOA %.1f°, source=%s(%d, spread %.1f°), "
+                  "speech=%s, age %.3fs",
+                  math.degrees(angle), source, len(pool), spread,
+                  direction["speech_detected"], now - newest["sampled_at"])
+        return {"direction": direction}
 
     def _run(self):
         warned = False
         while not self._stop.is_set():
             if self.playing():
                 with self._lock:
-                    self._reading = None
+                    self._samples.clear()
             else:
                 try:
                     started = self.clock()
