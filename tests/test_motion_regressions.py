@@ -52,3 +52,12 @@ def test_official_sixty_hz_accounts_for_compute_and_never_catches_up():
     assert CONTROL_LOOP_HZ == 60
     assert tick_delay(1, 1.005) == pytest.approx(1 / 60 - .005)
     assert tick_delay(1, 1.1) == 0
+
+
+def test_unfreeze_timer_includes_breathing_start_delay():
+    m = Motion()
+    m.event({'event': 'listening'})
+    m.event({'event': 'tts_speaking'})
+    for i in range(25):
+        m.sample(i / 60, 1 / 60)
+    assert m._unfreeze_elapsed == pytest.approx(.4)

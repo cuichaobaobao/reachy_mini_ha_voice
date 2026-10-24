@@ -66,6 +66,7 @@ class Motion:
                 self._idle_origin = (tuple(self.pose), self.z)
             elapsed = now - self._idle_started
             if elapsed < 0.3:
+                self._unfreeze_elapsed = min(0.4, self._unfreeze_elapsed + dt)
                 return tuple(self.pose)
             phase = elapsed - 0.3
             blend = smoothstep(phase)  # One second, with continuous endpoint velocity.
