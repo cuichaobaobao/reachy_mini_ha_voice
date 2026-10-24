@@ -612,6 +612,8 @@ async def run_voice(owner) -> None:
         state.music_player.close()
         state.audio_queue.put_nowait(None)
         process_audio_thread.join(timeout=3)
+        await discovery._aiozc.async_unregister_all_services()
+        await discovery._aiozc.async_close()
         if peripheral_api is not None:
             await peripheral_api.stop()
 

@@ -84,6 +84,7 @@ class SdkAudio:
     def flush(self):
         self.backend.clear_player()
         self.wobbler.reset()
+        self._speech = False
 
     async def _render(self):
         frames = self.rate // 50

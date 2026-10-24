@@ -11,7 +11,7 @@ requires-python = ">=3.11"
 license = {text = "Apache-2.0"}
 keywords = ["reachy-mini-app", "home-assistant"]
 dependencies = [
-  "reachy-mini>=1.12.0", "websockets==12",
+  "reachy-mini>=1.12.0,<1.13", "websockets==12",
   "aioesphomeapi==45.3.1; sys_platform == 'linux'",
   "netifaces2==0.0.22; sys_platform == 'linux'",
   "numpy>=2,<3",

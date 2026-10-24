@@ -23,7 +23,8 @@ async def main():
             *[
                 sys.executable,
                 "-c",
-                "import runpy; from reachy_mini_ha_voice.sdk_audio import SdkAudio; "
+                "import runpy, faulthandler; faulthandler.dump_traceback_later(20, repeat=True); "
+                "from reachy_mini_ha_voice.sdk_audio import SdkAudio; "
                 "SdkAudio.connect_motion = lambda self: None; "
                 "runpy.run_module('linux_voice_assistant', run_name='__main__')",
                 "--host",
