@@ -13,6 +13,52 @@ ROOT = Path(__file__).resolve().parents[1]
 VENDOR = ROOT / "reachy_mini_ha_voice/vendor/lva"
 
 
+async def first_announcement(client):
+    """HA-style first announcement must fetch HTTP audio without manual retry."""
+    import io
+    import wave
+    from aioesphomeapi.api_pb2 import VoiceAssistantAnnounceRequest, VoiceAssistantAnnounceFinished
+
+    stream = io.BytesIO()
+    with wave.open(stream, "wb") as output:
+        output.setnchannels(1)
+        output.setsampwidth(2)
+        output.setframerate(16000)
+        output.writeframes(b"\0\0" * 3200)
+    body = stream.getvalue()
+    fetched = asyncio.Event()
+    requests = []
+
+    async def serve(reader, writer):
+        try:
+            headers = await asyncio.wait_for(reader.readuntil(b"\r\n\r\n"), 5)
+            requests.append(headers.split(b"\r\n", 1)[0])
+            fetched.set()  # Same success criterion as HA's connection_test view.
+            await asyncio.sleep(.3)  # Cold/slow response must not finish early.
+            writer.write((f"HTTP/1.1 200 OK\r\nContent-Type: audio/wav\r\nContent-Length: {len(body)}\r\nConnection: close\r\n\r\n").encode() + body)
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    async with await asyncio.start_server(serve, "127.0.0.1", 0) as server:
+        port = server.sockets[0].getsockname()[1]
+        url = f"http://127.0.0.1:{port}/api/assist_satellite/connection_test/first"
+        request = asyncio.create_task(client._get_connection().send_message_await_response(
+            VoiceAssistantAnnounceRequest(media_id=url), VoiceAssistantAnnounceFinished, timeout=10))
+        try:
+            await asyncio.wait_for(fetched.wait(), 10)
+            assert not request.done(), "Announcement completed before response audio arrived"
+            await asyncio.wait_for(request, 10)
+            assert len(requests) == 1, requests
+            assert requests[0].startswith(b"GET /api/assist_satellite/connection_test/first ")
+        finally:
+            if not request.done():
+                request.cancel()
+                await asyncio.gather(request, return_exceptions=True)
+    print("First ESPHome announcement -> HTTP test audio fetched and completed without retry")
+
+
 async def main():
     assert ctypes.util.find_library("mpv") is None, "Regression must run without libmpv"
     assert not __import__("subprocess").run(["pgrep", "-x", "pulseaudio"], capture_output=True).returncode == 0
@@ -73,6 +119,7 @@ async def main():
             print(
                 f"ESPHome handshake successful: {info.name}, {len(entities)} entities"
             )
+            await first_announcement(client)
             import json
 
             from websockets.client import connect

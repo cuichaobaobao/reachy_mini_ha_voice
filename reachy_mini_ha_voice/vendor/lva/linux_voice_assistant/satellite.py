@@ -687,7 +687,8 @@ class VoiceSatelliteProtocol(APIServer):
             self.handle_voice_event(VoiceAssistantEventType(msg.event_type), data)
 
         elif isinstance(msg, VoiceAssistantAnnounceRequest):
-            _LOGGER.debug("Announcing: %s", msg.text)
+            _LOGGER.info("HA announcement received: preannounce=%s, start_conversation=%s",
+                         bool(msg.preannounce_media_id), msg.start_conversation)
 
             assert self.state.media_player_entity is not None
 

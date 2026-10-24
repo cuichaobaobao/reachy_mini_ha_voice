@@ -3,6 +3,7 @@
 import asyncio
 import logging
 import threading
+import time
 from functools import wraps
 from pathlib import Path
 from urllib.parse import urlparse
@@ -42,6 +43,10 @@ class ReachyTtsPlayer:
         self._contributed = False
         self.paused = False
         self._closed = False
+        self._decoder_eos = False
+        self._first_pcm = False
+        self._started_at = 0.0
+        self._item = 0
         audio.players.append(self)
 
     @property
@@ -69,6 +74,13 @@ class ReachyTtsPlayer:
         url = self._urls.pop(0)
         if not urlparse(url).scheme:
             url = Path(url).resolve().as_uri()
+        self._decoder_eos = False
+        self._first_pcm = False
+        self._started_at = time.monotonic()
+        self._item += 1
+        parsed = urlparse(url)
+        # Never log signed URLs, query tokens, credentials or announcement text.
+        _LOG.info("Audio item %d starting: scheme=%s host=%s", self._item, parsed.scheme, parsed.hostname)
         sink = Gst.parse_bin_from_description(
             f'audioconvert ! audioresample ! audio/x-raw,format=F32LE,rate={self.audio.rate},channels=1 '
             '! appsink name=decoded sync=false max-buffers=4 drop=false', True
@@ -91,10 +103,12 @@ class ReachyTtsPlayer:
         self._contributed = False
         if not self.is_playing or self.paused:
             return np.empty(0, dtype=np.float32)
-        error = self._pipeline.get_bus().pop_filtered(Gst.MessageType.ERROR)
-        if error:
-            self._failed(str(error.parse_error()[0]))
-            return np.empty(0, dtype=np.float32)
+        bus = self._pipeline.get_bus()
+        while message := bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS):
+            if message.type == Gst.MessageType.ERROR:
+                self._failed(str(message.parse_error()[0]))
+                return np.empty(0, dtype=np.float32)
+            self._decoder_eos = True
         while len(self._pending) < frames:
             sample = self._sink.emit("try-pull-sample", 0)
             if sample is None:
@@ -108,9 +122,15 @@ class ReachyTtsPlayer:
                     buffer.unmap(mapped)
         result, self._pending = self._pending[:frames], self._pending[frames:]
         self._contributed = bool(len(result))
+        if len(result) and not self._first_pcm:
+            self._first_pcm = True
+            _LOG.info("Audio item %d first PCM after %.3fs", self._item, time.monotonic() - self._started_at)
+        # appsink.eos also returns True in NULL/READY, before playback starts.
+        # Only an actual bus EOS proves decoding ended; never cancel cold startup.
         # Decoder EOS means data decoded, not sound finished. Wait for the SDK
         # clock to reach the final submitted sample plus pipeline latency.
-        if not len(result) and self._sink.get_property("eos") and now >= self._audible_until:
+        if not len(result) and self._decoder_eos and now >= self._audible_until:
+            _LOG.info("Audio item %d finished after %.3fs", self._item, time.monotonic() - self._started_at)
             self._clear(flush=False)
             self._next()
         return result

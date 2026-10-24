@@ -17,6 +17,25 @@ from reachy_mini.media.media_manager import MediaBackend, MediaManager
 
 
 async def main():
+    # Real GStreamer reproduction: NULL appsink reports eos before any URL
+    # has started. Older player.take() closed this pipeline on its first poll.
+    from gi.repository import Gst
+    from unittest.mock import Mock
+    cold_audio = SimpleNamespace(players=[], rate=16000, flush=Mock())
+    cold = ReachyTtsPlayer(cold_audio)
+    cold._pipeline = Gst.Pipeline.new("cold-regression")
+    cold._sink = Gst.ElementFactory.make("appsink")
+    cold._pipeline.add(cold._sink)
+    completed = []
+    cold._callback = lambda: completed.append(True)
+    assert cold._sink.get_property("eos") is True
+    for _ in range(10):
+        assert len(cold.take(320, 0)) == 0
+        assert cold.is_playing, "Cold decoder incorrectly treated as completed"
+        assert not completed
+        await asyncio.sleep(.01)
+    cold.close()
+    print("Real NULL-state appsink EOS cannot cancel cold playback: passed")
     offsets = []
     install()
     MediaManager._init_camera = lambda *args: None
