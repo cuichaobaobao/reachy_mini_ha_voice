@@ -69,8 +69,8 @@ class Heading:
                         _LOG.info("Wake turn skipped: sample age %.3fs, DOA %.3f rad", age, angle)
                         return
                     relative = 90.0 - math.degrees(angle)
-                    if abs(relative) < 6.0:
-                        _LOG.info("Wake turn skipped: relative %.1f° inside 6° deadband", relative)
+                    if abs(relative) < 3.0:
+                        _LOG.info("Wake turn skipped: relative %.1f° inside 3° deadband", relative)
                         return
                     target = max(-self.BODY_YAW_LIMIT, min(self.BODY_YAW_LIMIT, measured_yaw + relative))
                     duration = max(0.65, min(1.25, abs(target - self.yaw) / 75.0))

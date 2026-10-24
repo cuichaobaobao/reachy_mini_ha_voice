@@ -21,7 +21,9 @@ URL = (
     "http://127.0.0.1:8000/api/state/full?with_doa=true"
     "&with_control_mode=false&with_body_yaw=false&with_antenna_positions=false"
 )
-SPEECH_WINDOW = 0.4
+SPEECH_WINDOW = 0.8
+MIN_SPEECH_SAMPLES = 3
+SEED_CLUSTER = math.radians(30.0)
 SAMPLE_LIMIT = 64
 
 
@@ -86,7 +88,18 @@ class DirectionReader:
             _LOG.info("Wake direction skipped: %s", self._last_error)
             return {}
         speech = [s for s in recent if s["speech_detected"]]
-        pool = speech or recent
+        if len(speech) >= MIN_SPEECH_SAMPLES:
+            pool, source = speech, "speech"
+        elif speech:
+            # One or two voice-flagged frames are too few on their own: keep
+            # them as the seed and add nearby frames of the same utterance.
+            seed = circular_median([s["angle"] for s in speech], math.pi)
+            pool = [s for s in recent
+                    if abs(((s["angle"] - seed + math.pi / 2) % math.pi) - math.pi / 2) <= SEED_CLUSTER]
+            pool = pool or speech
+            source = "mixed"
+        else:
+            pool, source = recent, "recent"
         angle = circular_median([s["angle"] for s in pool], math.pi)
         yaw = circular_median([s["head_yaw"] for s in pool], 2 * math.pi)
         if yaw > math.pi:
@@ -94,7 +107,6 @@ class DirectionReader:
         elif yaw < -math.pi:
             yaw += 2 * math.pi
         newest = max(pool, key=lambda s: s["sampled_at"])
-        source = "speech" if speech else "recent"
         spread = _spread_degrees([s["angle"] for s in pool])
         direction = {
             "angle": angle,

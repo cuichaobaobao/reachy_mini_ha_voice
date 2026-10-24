@@ -14,7 +14,7 @@ def wake(now, relative=30, measured=0):
 
 
 def test_full_angle_duration_and_deadband():
-    for relative, duration in [(5, None), (30, .65), (40, .65), (90, 1.2)]:
+    for relative, duration in [(2, None), (5, .65), (30, .65), (40, .65), (90, 1.2)]:
         h = Heading()
         h.event(wake(10, relative), 10)
         if duration is None:
@@ -115,7 +115,7 @@ def test_wake_reader_accepts_fresh_direction_after_hardware_vad_ends():
     reader.update(payload, 10.4)
     now[0] = 10.7
     assert reader.snapshot()["direction"]["speech_detected"] is False
-    now[0] = 11.1  # Still reject genuinely stale direction.
+    now[0] = 11.5  # Still reject genuinely stale direction (window is 0.8 s).
     reader.update({'doa': None}, 10.7)
     assert reader.snapshot() == {}
 
@@ -212,7 +212,7 @@ def test_sdk_pose_sampler_has_no_http_and_follows_new_source():
         h.event({'event': 'wake_word_detected', 'data': first}, time.monotonic())
         assert h.sample(time.monotonic() + 2) == pytest.approx(90)
         values[:] = [math.pi, math.radians(90)]
-        for _ in range(100):
+        for _ in range(400):
             latest = reader.snapshot()
             if latest.get('direction', {}).get('angle') == math.pi:
                 break
