@@ -12,6 +12,7 @@ from reachy_mini.utils.interpolation import linear_pose_interpolation
 
 from reachy_mini_ha_voice.motion import (
     CONTROL_LOOP_HZ,
+    FREEZE_DEADZONE,
     NEUTRAL_ANTENNAS,
     Motion,
     relative_to_heading,
@@ -71,6 +72,9 @@ def test_frames_match_upstream_lifecycle(listening_windows, failed_sends):
     official = official_manager(lambda: feedback)
     listening = False
     samples = []
+    # Deliberate deviation: a freeze inside the vertical deadzone is moved onto
+    # the +/-10 degree bias, so only those episodes skip the antenna oracle.
+    deviation_until = -1.0
     for frame in range(900):
         now = frame / 60
         official.time = now
@@ -78,13 +82,18 @@ def test_frames_match_upstream_lifecycle(listening_windows, failed_sends):
         if wanted != listening:
             official._handle_command('set_listening', wanted, now)
             motion.event({'event': 'listening' if wanted else 'thinking'}, now)
+            if wanted and any(abs(a) < FREEZE_DEADZONE for a in official._listening_antennas):
+                deviation_until = float('inf')
+            elif not wanted and deviation_until == float('inf'):
+                deviation_until = now + .4  # unfreeze blend from the adjusted bias
             listening = wanted
         official._update_primary_motion(now)
         head, antennas, body = official._get_primary_pose(now)
         antennas = official._calculate_blended_antennas(antennas)
         actual_head, actual_antennas = motion.sample(now)
         np.testing.assert_allclose(actual_head, head, atol=1e-12, rtol=0)
-        np.testing.assert_allclose(actual_antennas, antennas, atol=1e-12, rtol=0)
+        if now >= deviation_until:
+            np.testing.assert_allclose(actual_antennas, antennas, atol=1e-12, rtol=0)
         if not (failed_sends and (90 <= frame < 180 or 310 <= frame < 350)):
             official._last_commanded_pose = (head, antennas, body)
             motion.command_sent(actual_antennas)

@@ -14,11 +14,29 @@ from .official_breathing import BreathingMove
 
 CONTROL_LOOP_HZ = 60.0
 NEUTRAL_ANTENNAS = (-0.1745, 0.1745)
+# Holding the antennas vertical is an unstable gearbox equilibrium and shakes.
+# Listening is the only static hold, so a near-vertical freeze moves onto the
+# SDK's own +/-10 degree resting bias (PR #952) instead of sitting at 0 degrees.
+FREEZE_DEADZONE = math.radians(8.0)
+FREEZE_BIAS = 0.1745
+FREEZE_ADJUST_SECONDS = 0.2
+_FREEZE_DEFAULT_SIGNS = (-1.0, 1.0)
 _LOG = logging.getLogger(__name__)
 
 
 def tick_delay(started, finished):
     return max(0.0, 1.0 / CONTROL_LOOP_HZ - max(0.0, finished - started))
+
+
+def deadzone_safe_antennas(antennas):
+    """Move a near-vertical pair onto the same-side +/-10 degree resting bias."""
+    safe = []
+    for value, default_sign in zip(antennas, _FREEZE_DEFAULT_SIGNS):
+        if abs(value) < FREEZE_DEADZONE:
+            safe.append(math.copysign(FREEZE_BIAS, value if value else default_sign))
+        else:
+            safe.append(value)
+    return tuple(safe)
 
 
 def relative_to_heading(head, heading):
@@ -43,6 +61,8 @@ class Motion:
         self._last_activity = None
         self._last_commanded_antennas = self.antennas
         self._frozen_antennas = self.antennas
+        self._freeze_from = self._freeze_to = None
+        self._freeze_started = None
         self._blend = 1.0
         self._last_blend_time = None
         self._now = 0.0
@@ -73,10 +93,25 @@ class Motion:
             now = self._now if now is None else now
             self._last_activity = self._last_blend_time = now
             self._blend = 0.0
+            self._freeze_from = self._freeze_to = None
+            self._freeze_started = None
             if self.state == "listening":
-                self._frozen_antennas = self._last_commanded_antennas
-                _LOG.info("Listening antenna freeze: right %.2f°, left %.2f°",
-                          *map(math.degrees, self._frozen_antennas))
+                raw = tuple(self._last_commanded_antennas)
+                safe = deadzone_safe_antennas(raw)
+                self._frozen_antennas = raw
+                if safe != raw:
+                    self._freeze_from, self._freeze_to = raw, safe
+                    self._freeze_started = now
+                    _LOG.info("Listening antenna freeze: right %.2f°, left %.2f° "
+                              "(vertical deadzone, moving to right %.2f°, left %.2f°)",
+                              math.degrees(raw[0]), math.degrees(raw[1]),
+                              math.degrees(safe[0]), math.degrees(safe[1]))
+                else:
+                    _LOG.info("Listening antenna freeze: right %.2f°, left %.2f°",
+                              math.degrees(raw[0]), math.degrees(raw[1]))
+            else:
+                # Leaving mid-adjustment must start the unfreeze from what was sent.
+                self._frozen_antennas = tuple(self.antennas)
             # Upstream does not cancel/reset an already queued/running breath.
 
     def command_sent(self, antennas):
@@ -85,6 +120,21 @@ class Motion:
         This is not a hardware acknowledgement, matching the official manager.
         """
         self._last_commanded_antennas = tuple(antennas)
+
+    def _frozen_target(self, now):
+        """Hold the frozen pair, easing a near-vertical freeze onto the bias."""
+        if self._freeze_from is None:
+            return tuple(self._frozen_antennas)
+        elapsed = 0.0 if self._freeze_started is None else max(0.0, now - self._freeze_started)
+        t = min(1.0, elapsed / FREEZE_ADJUST_SECONDS)
+        blend = t * t * (3 - 2 * t)
+        value = tuple(a + (b - a) * blend for a, b in zip(self._freeze_from, self._freeze_to))
+        if t >= 1.0:
+            self._frozen_antennas = tuple(self._freeze_to)
+            self._freeze_from = self._freeze_to = None
+            self._freeze_started = None
+            return tuple(self._frozen_antennas)
+        return value
 
     def sample(self, now):
         self._now = now
@@ -115,7 +165,7 @@ class Motion:
         dt = 0.0 if self._last_blend_time is None else max(0.0, now - self._last_blend_time)
         self._last_blend_time = now
         if self.state == "listening":
-            self.antennas = self._frozen_antennas
+            self.antennas = self._frozen_target(now)
             self._blend = 0.0
         else:
             self._blend = min(1.0, self._blend + dt / 0.4)
