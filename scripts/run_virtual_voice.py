@@ -14,7 +14,9 @@ from reachy_mini_ha_voice.runtime import VoiceWorker
 # Only physical camera/capture/speaker endpoints are substituted.
 MediaManager._init_camera = lambda *args: None
 media = MediaManager(backend=MediaBackend.LOCAL)
-robot = SimpleNamespace(media=media, client=Mock())
+robot = SimpleNamespace(media=media, client=Mock(),
+                        get_current_head_pose=lambda: [[1, 0, 0, 0], [0, 1, 0, 0],
+                                                       [0, 0, 1, 0], [0, 0, 0, 1]])
 stop = threading.Event()
 signal.signal(signal.SIGTERM, lambda *_: stop.set())
 worker = VoiceWorker(sys.argv[1:], robot)

@@ -51,7 +51,8 @@ def test_normal_stop_cleans_child_and_returns_neutral(
     robot.disable_wobbling.assert_called_once()
     assert robot.set_target.call_count == 1
     assert robot.goto_target.call_count == 2
-    assert robot.goto_target.call_args.kwargs["antennas"] == [0, 0]
+    assert robot.goto_target.call_args.kwargs["antennas"] == pytest.approx(
+        [app_module.math.radians(-10), app_module.math.radians(10)])
     assert not any(t.name == "ha-voice-events" for t in threading.enumerate())
 
 
@@ -74,7 +75,8 @@ def test_child_failure_is_visible_and_cleaned(app_module, monkeypatch, tmp_path)
     assert robot.goto_target.call_count == 2
 
 
-def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monkeypatch, tmp_path):
+@pytest.mark.parametrize("direction", [1, -1])
+def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monkeypatch, tmp_path, direction):
     """Exercise actual run() motor commands through wake, speech, hold and return."""
     import math
 
@@ -88,14 +90,14 @@ def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monke
     async def reader(*_):
         return
     monkeypatch.setattr(app_module, "events", reader)
-    ticks = iter([0, 0, 1.2, 2, 3, 4, 8, 8.75, 9.5])
+    ticks = iter([0, *[t for now in [0, 1.2, 2, 3, 4, 8, 8.75, 9.5] for t in (now, now)]])
     monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
     stop = Mock()
     stop.is_set.return_value = False
     robot = Mock()
     frames = []
     queue.put({"event": "wake_word_detected", "data": {"direction": {
-        "angle": 0.0, "head_yaw": 0.0, "sampled_at": 0.0,
+        "angle": 0.0 if direction == 1 else math.pi, "head_yaw": 0.0, "sampled_at": 0.0,
     }}})
     def record(**command):
         frames.append(command)
@@ -108,6 +110,7 @@ def test_full_angle_body_follow_speech_hold_and_joint_recenter(app_module, monke
     robot.set_target.side_effect = record
     app_module.ReachyMiniHaVoice().run(robot, stop)
     for frame, expected in zip(frames, [0, 90, 90, 90, 90, 90, 45, 0]):
+        expected *= direction
         assert frame['head']['yaw'] == pytest.approx(expected)
         assert frame['body_yaw'] == pytest.approx(math.radians(expected))
     assert robot.goto_target.call_args.kwargs['body_yaw'] == 0.0

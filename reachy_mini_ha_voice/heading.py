@@ -16,6 +16,7 @@ class Heading:
         self._return_at = None
         self._watchdog = None
         self._ending = False
+        self._report = None
 
     def _turn(self, target, now, duration):
         self._trajectory = (self.yaw, target, now, duration)
@@ -53,6 +54,7 @@ class Heading:
             self._watchdog = None if event == "tts_speaking" else now + 120.0
             self.active = True
             if event == "wake_word_detected":
+                self._report = None
                 self._trajectory = None  # Also stop a return when direction is missing.
                 data = message.get("data") or {}
                 reading = data.get("direction") if isinstance(data, dict) else None
@@ -61,21 +63,42 @@ class Heading:
                     measured_yaw = math.degrees(float(reading["head_yaw"]))
                     age = now - float(reading["sampled_at"])
                     if not all(map(math.isfinite, (angle, measured_yaw, age))):
+                        _LOG.info("Wake turn skipped: invalid direction values")
                         return
                     if not 0 <= age <= 1.0 or not 0 <= angle <= math.pi:
+                        _LOG.info("Wake turn skipped: sample age %.3fs, DOA %.3f rad", age, angle)
                         return
                     relative = 90.0 - math.degrees(angle)
                     if abs(relative) < 6.0:
+                        _LOG.info("Wake turn skipped: relative %.1f° inside 6° deadband", relative)
                         return
                     target = max(-self.BODY_YAW_LIMIT, min(self.BODY_YAW_LIMIT, measured_yaw + relative))
                     duration = max(0.65, min(1.25, abs(target - self.yaw) / 75.0))
-                    _LOG.info("Wake turn: relative %.1f°, target %.1f°, duration %.2fs",
-                              relative, target, duration)
+                    _LOG.info("Wake turn: DOA %.1f°, relative %.1f°, measured head %.1f°, "
+                              "head/body target %.1f°, sample age %.3fs, duration %.2fs",
+                              math.degrees(angle), relative, measured_yaw, target, age, duration)
                     self._turn(target, now, duration)
+                    self._report = (now + duration + 0.3, target)
                 except (KeyError, TypeError, ValueError):
+                    _LOG.info("Wake turn skipped: no fresh speech direction available")
                     return
         elif event in ("tts_finished", "idle", "pipeline_error", "disconnected", "snapshot"):
             self._watchdog = None
             if self.active and not self._ending:
                 self._ending = True
                 self._return_at = now + 5.0
+
+    def report_measured(self, robot, now):
+        """One cached telemetry sample after a turn; this never commands motors."""
+        if self._report is None or now < self._report[0]:
+            return
+        _, target = self._report
+        self._report = None
+        try:
+            pose = robot.get_current_head_pose()
+            joints, _ = robot.get_current_joint_positions()
+            head = math.degrees(math.atan2(pose[1][0], pose[0][0]))
+            body = math.degrees(joints[0])
+            _LOG.info("Wake turn measured: target %.1f°, head %.1f°, body %.1f°", target, head, body)
+        except (AssertionError, OSError, TypeError, ValueError, IndexError):
+            _LOG.info("Wake turn measured: telemetry unavailable")

@@ -571,7 +571,7 @@ async def run_voice(owner, argv=None, robot=None) -> None:
     )
     process_audio_thread.start()
 
-    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing, doa=mic.media.get_DoA)
+    state.wake_direction_reader = DirectionReader(playing=lambda: state.tts_player.is_playing, doa=mic.media.get_DoA, pose=mic._robot.get_current_head_pose if mic._robot is not None else None)
     state.wake_direction_reader.start()
 
     # Auto discovery (zeroconf, mDNS)

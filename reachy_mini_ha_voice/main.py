@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import logging
 import math
 import os
 import threading
@@ -13,7 +14,7 @@ from reachy_mini import ReachyMiniApp
 from reachy_mini.utils import create_head_pose
 
 from .heading import Heading
-from .motion import Motion
+from .motion import NEUTRAL_ANTENNAS, Motion, tick_delay
 from .runtime import events, start_voice, stop_voice
 
 
@@ -32,6 +33,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
         settings = json.loads(config_path.read_text()) if config_path.exists() else {}
         if not isinstance(settings, dict):
             raise TypeError("config.json must contain a JSON object")
+        logging.getLogger("reachy_mini_ha_voice.heading").setLevel(logging.INFO)
         process = start_voice(data_dir, settings, reachy_mini)
         reader_stop = threading.Event()
         queue = Queue()
@@ -47,7 +49,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             reachy_mini.wake_up()
             awake = True
             reachy_mini.goto_target(
-                head=create_head_pose(), antennas=[0, 0], body_yaw=0.0, duration=1.0
+                head=create_head_pose(), antennas=[math.radians(a) for a in NEUTRAL_ANTENNAS], body_yaw=0.0, duration=1.0
             )
             if settings.get("head_tracking", False) is True:
                 reachy_mini.start_head_tracking(weight=1.0)
@@ -69,6 +71,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                     except Empty:
                         break
                 facing = heading.sample(now)
+                heading.report_measured(reachy_mini, now)
                 want_tracking = settings.get("head_tracking", False) is True and not heading.active
                 if tracking != want_tracking:
                     if want_tracking:
@@ -94,7 +97,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                     body_yaw=math.radians(facing),
                 )
                 previous = now
-                stop_event.wait(1 / 30)
+                stop_event.wait(tick_delay(now, time.monotonic()))
         finally:
             reader_stop.set()
             stop_voice(process)
@@ -104,7 +107,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                 reachy_mini.stop_head_tracking()
                 reachy_mini.disable_wobbling()
                 reachy_mini.goto_target(
-                    head=create_head_pose(), antennas=[0, 0], body_yaw=0.0, duration=1.0
+                    head=create_head_pose(), antennas=[math.radians(a) for a in NEUTRAL_ANTENNAS], body_yaw=0.0, duration=1.0
                 )
 
 

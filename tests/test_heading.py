@@ -123,10 +123,10 @@ def test_reader_requires_fresh_speech_and_measured_pose():
 def test_breathing_waits_until_return_complete():
     motion = Motion()
     motion.sample(0, 0)
-    assert motion.sample(10, .03, allow_breathing=False) == (0,) * 5
+    assert motion.sample(10, .03, allow_breathing=False) == (0, 0, 0, -10, 10)
     assert motion.z == 0
     motion.sample(11, .03)
-    motion.sample(14.8, .03)
+    motion.sample(13.8, .03)
     assert motion.z == pytest.approx(.005)
 
 
@@ -192,3 +192,58 @@ def test_full_world_heading_uses_only_body_boundary(measured, relative, expected
     h = Heading()
     h.event(wake(10, relative, measured), 10)
     assert h.sample(11.25) == pytest.approx(expected)
+
+
+def test_sdk_pose_sampler_has_no_http_and_follows_new_source():
+    import threading
+    import time
+    from unittest.mock import Mock
+
+    sampled = threading.Event()
+    values = [math.pi / 6, math.radians(30)]
+
+    def pose():
+        yaw = values[1]
+        sampled.set()
+        return [[math.cos(yaw), -math.sin(yaw)], [math.sin(yaw), math.cos(yaw)]]
+
+    reader = DirectionReader(doa=lambda: (values[0], True), pose=pose)
+    reader._opener = Mock()
+    reader.start()
+    try:
+        assert sampled.wait(1)
+        for _ in range(100):
+            first = reader.snapshot()
+            if first:
+                break
+            time.sleep(.005)
+        assert first['direction']['head_yaw'] == pytest.approx(math.radians(30))
+        h = Heading()
+        h.event({'event': 'wake_word_detected', 'data': first}, time.monotonic())
+        assert h.sample(time.monotonic() + 2) == pytest.approx(90)
+        values[:] = [math.pi, math.radians(90)]
+        for _ in range(100):
+            latest = reader.snapshot()
+            if latest.get('direction', {}).get('angle') == math.pi:
+                break
+            time.sleep(.005)
+        assert latest['direction']['angle'] == math.pi
+        reader._opener.open.assert_not_called()
+    finally:
+        reader.close()
+    assert not reader._thread.is_alive()
+
+
+def test_turn_diagnostics_distinguish_requested_and_measured_heading(caplog):
+    import logging
+    from types import SimpleNamespace
+
+    h = Heading()
+    robot = SimpleNamespace(get_current_head_pose=lambda: [[0, -1], [1, 0]],
+                            get_current_joint_positions=lambda: ([math.pi / 2] * 7, [0, 0]))
+    with caplog.at_level(logging.INFO):
+        h.event(wake(0, relative=90), 0)
+        h.report_measured(robot, 2)
+    assert 'head/body target 90.0°' in caplog.text
+    assert 'head 90.0°, body 90.0°' in caplog.text
+    assert h._report is None

@@ -19,9 +19,10 @@ URL = (
 
 
 class DirectionReader:
-    def __init__(self, playing=lambda: False, url=URL, clock=time.monotonic, doa=None):
+    def __init__(self, playing=lambda: False, url=URL, clock=time.monotonic, doa=None, pose=None):
         self.playing = playing
         self.doa = doa
+        self.pose = pose
         self.url = url.replace("with_doa=true", "with_doa=false") if doa else url
         self.clock = clock
         self._reading = None
@@ -66,8 +67,12 @@ class DirectionReader:
             else:
                 try:
                     started = self.clock()
-                    with self._opener.open(self.url, timeout=0.3) as response:
-                        payload = json.loads(response.read(65536))
+                    if self.pose is not None:
+                        matrix = self.pose()  # SDK telemetry cache; no HTTP round trip.
+                        payload = {"head_pose": {"yaw": math.atan2(matrix[1][0], matrix[0][0])}}
+                    else:
+                        with self._opener.open(self.url, timeout=0.3) as response:
+                            payload = json.loads(response.read(65536))
                     if self.doa is not None:
                         direction = self.doa()
                         payload["doa"] = (
@@ -77,11 +82,11 @@ class DirectionReader:
                     # Reject a request overlapping audio playback.
                     if not self.playing():
                         self.update(payload, started)
-                except (OSError, ValueError):
+                except (OSError, ValueError, TypeError, IndexError, AssertionError):
                     if not warned:
-                        _LOG.warning("Daemon DOA unavailable; wake turning skipped until readings recover")
+                        _LOG.warning("Wake direction unavailable; turning skipped until readings recover")
                         warned = True
-            self._stop.wait(0.1)
+            self._stop.wait(0.05 if self.pose is not None else 0.1)
 
     def close(self):
         self._stop.set()

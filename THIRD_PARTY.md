@@ -11,3 +11,5 @@ Wake-facing behavior was studied in ha-china/Reachy_Mini_For_Home_Assistant and 
 0.4.0 SDK audio ownership was informed by the ha-china reference implementation. No source was copied. The adapter uses SDK GStreamerAudio for capture, ALSA routing, and output; only decoding/mixing and LVA lifecycle adaptation are application code. SDK1.12 internal appsrc timestamps are isolated in sdk_audio.py because the SDK has no public playback-drained API.
 
 0.5.0: LVA runs in a cancellable worker sharing the official application SDK media manager. No no_media clients or separate production audio backend. Parser arguments are injected without changing global argv; logging formatter changes stay local. HA/wake protocol unchanged.
+
+0.5.1 motion alignment: official conversation moves.py uses60Hz,0.1Hz/5mm breathing,0.5Hz/15° antenna sway and.4s unfreeze; SDK troubleshooting/PR952 recommends±10° rest bias. This app retains that bias during sway and uses a smooth interpolation envelope to avoid upstream's rest-to-zero boundary jump. Thinking gestures and acoustic heading remain application-specific.
