@@ -11,7 +11,7 @@ jobs:
       - name: Use Ubuntu archive for system dependencies
         run: |
           sudo find /etc/apt -type f \( -name '*.list' -o -name '*.sources' -o -name 'apt-mirrors*.txt' \) -exec sed -i -E 's|https?://azure.archive.ubuntu.com/ubuntu|https://archive.ubuntu.com/ubuntu|g' {} +
-      - run: sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y libpulse0 pulseaudio libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-pulseaudio gstreamer1.0-plugins-good gstreamer1.0-libav
+      - run: sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y libasound2-dev libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-alsa gstreamer1.0-plugins-good gstreamer1.0-libav
       - name: Ensure libmpv is absent (Wireless startup regression)
         run: sudo apt-get purge -y libmpv2 libmpv-dev mpv
       - uses: astral-sh/setup-uv@v6
@@ -20,12 +20,12 @@ jobs:
       - run: ruff check reachy_mini_ha_voice tests
       - run: python -m build
       - run: reachy-mini-app-assistant check .
-      - name: Start virtual audio and test real ESPHome runtime
+      - name: Test SDK ALSA audio without PulseAudio and real ESPHome runtime
         run: |
-          pulseaudio --start --exit-idle-time=-1
-          pactl load-module module-null-sink sink_name=reachy_test
-          pactl set-default-sink reachy_test
-          pactl set-default-source reachy_test.monitor
+          cat > ~/.asoundrc <<'EOF'
+          pcm.reachymini_audio_src { type null }
+          pcm.reachymini_audio_sink { type null }
+          EOF
           python scripts/smoke_linux.py
           python scripts/smoke_tts.py
           python scripts/smoke_direction.py

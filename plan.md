@@ -19,3 +19,6 @@ Remove arbitrary ±40° cap. Full DOA-derived heading drives both world head yaw
 
 ## 0.3.2 robot startup fix
 User robot fails due to missing libmpv. Remove runtime dependency and switch music to GStreamer without speech motion. Test actual LVA boot and media controls in Linux with libmpv absent, then publish GitHub/HF. Do not connect to robot or install OS packages on it.
+
+## 0.4.0 SDK audio adapter (approved)
+Replace soundcard/PulseAudio input and direct pulsesink output with one SDK-owned audio backend in the LVA child; parent remains no_media and owns base motion. Preserve upstream wake/HA protocol logic. Use SDK synchronized wobbling and playback clock, bounded decode queues, shared playback mixing, clear_player on interruption and deterministic shutdown. Verify SDK1.12 interfaces against read-only robot source. Add no-Pulse Linux virtual-device integration and unit regressions; publish only after checks. Robot remains read-only.

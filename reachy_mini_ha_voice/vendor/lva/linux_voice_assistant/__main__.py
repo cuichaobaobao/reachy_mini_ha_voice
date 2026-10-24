@@ -5,6 +5,7 @@ import errno
 import json
 import logging
 import sys
+import signal
 import threading
 import time
 from pathlib import Path
@@ -12,7 +13,6 @@ from queue import Queue
 from typing import List, Optional, Union
 
 import numpy as np
-import soundcard as sc
 from aioesphomeapi.api_pb2 import NumberStateResponse  # type: ignore  # pylint: disable=no-name-in-module
 from getmac import get_mac_address  # type: ignore
 from pymicro_wakeword import MicroWakeWord, MicroWakeWordFeatures
@@ -20,6 +20,7 @@ from pyopen_wakeword import OpenWakeWord, OpenWakeWordFeatures
 
 from .models import Preferences, ServerState, WakeWordType, initial_stop_word_threshold
 from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
+from reachy_mini_ha_voice.sdk_audio import SdkAudio
 from reachy_mini_ha_voice.direction import DirectionReader
 from .peripheral_api import LVAEvent, PeripheralAPIServer
 from .satellite import VoiceSatelliteProtocol
@@ -44,6 +45,17 @@ _SOUNDS_DIR = _REPO_DIR / "sounds"
 
 
 async def main() -> None:
+    owner = []
+    task = asyncio.current_task()
+    asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
+    try:
+        await run_voice(owner)
+    finally:
+        for audio in owner:
+            await audio.close()
+
+
+async def run_voice(owner) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--name",
@@ -263,15 +275,13 @@ async def main() -> None:
     if args.list_input_devices:
         print("Audio Input devices:")
         print("=" * 13)
-        for idx, mic in enumerate(sc.all_microphones()):
-            print(f"[{idx}]", mic.name)
+        print("Reachy Mini SDK: processed microphone (16 kHz mono)")
         return
 
     if args.list_output_devices:
         print("Audio output devices:")
         print("=" * 14)
-        for speaker in sc.all_speakers():
-            print("pulse/" + str(speaker.id) + ":", speaker.name)
+        print("Reachy Mini SDK: configured robot speaker")
         return
 
     # Resolve network interface for mac-address detection
@@ -326,16 +336,10 @@ async def main() -> None:
     args.download_dir = Path(args.download_dir)
     args.download_dir.mkdir(parents=True, exist_ok=True)
 
-    # Resolve microphone
-    if args.audio_input_device is not None:
-        try:
-            args.audio_input_device = int(args.audio_input_device)
-        except ValueError:
-            pass
-
-        mic = sc.get_microphone(args.audio_input_device)
-    else:
-        mic = sc.default_microphone()
+    if any((args.audio_input_device, args.audio_output_device, args.music_output_device)):
+        parser.error("Audio devices are managed by Reachy Mini SDK; remove custom device overrides")
+    if args.audio_input_channels != 1:
+        parser.error("Reachy SDK adapter exposes only the processed microphone channel")
 
     # Load available wake words
     wake_word_dirs = [Path(ww_dir) for ww_dir in args.wake_word_dir]
@@ -419,6 +423,11 @@ async def main() -> None:
     stop_model = load_stop_model(wake_word_dirs, args.stop_model)
     assert stop_model is not None
 
+    mic = SdkAudio()
+    owner.append(mic)
+    mic.connect_motion()
+    await asyncio.to_thread(mic.record, 320)  # Fail before discovery if capture is unavailable.
+
     state = ServerState(
         name=device_name,
         friendly_name=friendly_name,
@@ -433,8 +442,8 @@ async def main() -> None:
         wake_words=wake_models,
         active_wake_words=active_wake_words,
         stop_word=stop_model,
-        music_player=ReachyTtsPlayer(device=args.music_output_device or args.audio_output_device, wobble=False),
-        tts_player=ReachyTtsPlayer(device=args.audio_output_device),
+        music_player=ReachyTtsPlayer(mic, wobble=False),
+        tts_player=ReachyTtsPlayer(mic),
         wakeup_sound=args.wakeup_sound,
         start_listening_sound=args.start_listening_sound,
         timer_finished_sound=args.timer_finished_sound,
@@ -593,15 +602,16 @@ async def main() -> None:
     try:
         async with server:  # type: ignore[union-attr]
             _LOGGER.info("Server started (host=%s, port=%s)", host_ip_address, args.port)
-            await server.serve_forever()  # type: ignore[union-attr]
+            await asyncio.gather(server.serve_forever(), mic.task)
     except KeyboardInterrupt:
         pass
     finally:
+        mic.closed.set()
         state.wake_direction_reader.close()
         state.tts_player.close()
         state.music_player.close()
         state.audio_queue.put_nowait(None)
-        process_audio_thread.join()
+        process_audio_thread.join(timeout=3)
         if peripheral_api is not None:
             await peripheral_api.stop()
 
@@ -661,7 +671,7 @@ def process_audio(state: ServerState, mic, block_size: int):
     try:
         _LOGGER.debug("Opening audio input device: %s", mic.name)
         with mic.recorder(samplerate=16000, channels=n_channels, blocksize=block_size) as mic_in:
-            while True:
+            while not mic.closed.is_set():
                 # Shape: (block_size, n_channels) for stereo, (block_size, 1) for mono.
                 raw = mic_in.record(block_size)  # float32, range [-1, 1]
                 mic_vol_scalar = max(0.1, min(1.0, state.mic_volume / 100.0))
@@ -847,9 +857,11 @@ def process_audio(state: ServerState, mic, block_size: int):
                         state.satellite.stop()
                 except Exception:  # pylint: disable=broad-except
                     _LOGGER.exception("Unexpected error handling audio")
+    except EOFError:
+        pass
     except Exception:  # pylint: disable=broad-except
         _LOGGER.exception("Unexpected error processing audio")
-        sys.exit(1)
+        mic.fail_capture()
 
 
 # -----------------------------------------------------------------------------

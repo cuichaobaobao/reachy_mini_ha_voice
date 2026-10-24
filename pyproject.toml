@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_ha_voice"
-version = "0.3.2"
+version = "0.4.0"
 description = "Home Assistant Assist voice satellite with Reachy Mini gestures"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -14,7 +14,7 @@ dependencies = [
   "reachy-mini>=1.12.0", "websockets==12",
   "aioesphomeapi==45.3.1; sys_platform == 'linux'",
   "netifaces2==0.0.22; sys_platform == 'linux'",
-  "soundcard<1; sys_platform == 'linux'", "numpy>=2,<3",
+  "numpy>=2,<3",
   "pymicro-wakeword>=2,<3; sys_platform == 'linux'",
   "pyopen-wakeword>=1,<2; sys_platform == 'linux'",
   "zeroconf<1",

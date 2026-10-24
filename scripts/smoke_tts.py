@@ -9,11 +9,15 @@ from pathlib import Path
 
 import numpy as np
 from reachy_mini_ha_voice.tts_player import ReachyTtsPlayer
+from reachy_mini_ha_voice.sdk_audio import SdkAudio
 
 
 async def main():
     offsets = []
-    player = ReachyTtsPlayer(offset_callback=offsets.append)
+    audio = SdkAudio(offset_callback=offsets.append)
+    player = ReachyTtsPlayer(audio)
+    captured = await asyncio.to_thread(audio.record, 320)
+    assert captured.shape == (320, 1)
     try:
         with tempfile.TemporaryDirectory() as directory:
             path = Path(directory) / "speech.wav"
@@ -63,38 +67,40 @@ async def main():
             assert offsets[-1] == (0,) * 6
             assert len(offsets) == count, 'Offsets continued after interruption'
             music_offsets = []
-            music = ReachyTtsPlayer(wobble=False, offset_callback=music_offsets.append)
+            music = ReachyTtsPlayer(audio, wobble=False)
+            music_offsets.extend(offsets)
             try:
                 music_done = asyncio.Event()
                 music.play([str(path), str(path)], music_done.set)
                 music.set_volume(60)
                 music.duck(.5)
-                assert abs(music._pipeline.get_property('volume') - .3) < 1e-3
+                assert abs(music.gain - .3) < 1e-3
                 await asyncio.sleep(.2)
                 music.pause()
                 await asyncio.sleep(.2)
                 assert music.is_playing
                 music.unduck()
                 # PulseAudio round-trips volume through its finite-resolution scale.
-                volume = music._pipeline.get_property('volume')
+                volume = music.gain
                 assert abs(volume - .6) < 1e-3, volume
                 music.resume()
                 await asyncio.wait_for(music_done.wait(), 10)
                 assert not music.is_playing
-                assert music._robot is None and not music_offsets
+                assert offsets == music_offsets
                 calls = []
                 music.play(str(path), lambda: calls.append('stopped'))
                 music.stop()
                 assert calls == ['stopped']
             finally:
                 music.close()
-            assert music._thread is player._thread
-            assert player._thread.is_alive()  # Closing music must not stop TTS scheduling.
+            assert not audio.task.done()
+            assert (await asyncio.to_thread(audio.record, 320)).shape == (320, 1)
             print('GStreamer music: playlist, pause/resume, volume, duck, stop; no robot/offsets')
             print('Real TTS PCM -> official HeadWobbler: nonzero motion, EOS, replacement, stop passed')
     finally:
         player.close()
-        assert not player._thread.is_alive()
+        await audio.close()
+        assert not audio.backend._thread_bus_calls.is_alive()
 
 
 asyncio.run(main())
