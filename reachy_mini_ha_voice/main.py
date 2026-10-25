@@ -23,7 +23,7 @@ from .motion import (
 )
 from .motion_link import MotionLink
 from .runtime import events, start_voice, stop_voice
-from .startup import is_sleeping
+from .startup import wake_up_if_sleeping
 
 
 class ReachyMiniHaVoice(ReachyMiniApp):
@@ -61,8 +61,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
         awake = False
         try:
             reader.start()
-            if is_sleeping(reachy_mini):
-                reachy_mini.wake_up()
+            wake_up_if_sleeping(reachy_mini)
             awake = True
             reachy_mini.goto_target(
                 head=create_head_pose(), antennas=list(NEUTRAL_ANTENNAS), body_yaw=0.0, duration=1.0
