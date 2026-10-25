@@ -1,4 +1,4 @@
-"""Local wake chime: SDK file playback on a worker, timed like the reference app.
+"""Local wake chime: SDK file playback on a worker, timed by file duration.
 
 SDK 1.12 has no public stop-file or file-volume method. Keep the playbin
 compatibility access here; never stop the shared recording/PCM pipeline.
@@ -38,8 +38,8 @@ class WakeSound:
                 raise RuntimeError("SDK did not create the wake sound player")
             self.set_gain(self.gain)
             _LOG.info("Wake sound: SDK file playback, duration %.3fs", duration)
-            # Same completion policy as the reference local-file player:
-            # elapsed file duration, not a hardware playback acknowledgement.
+            # Completion uses elapsed file duration, not a hardware playback
+            # acknowledgement. A stop signal interrupts the wait immediately.
             self.cancelled.wait(duration)
         except Exception as exc:  # noqa: BLE001 - report playback worker failure to owner.
             error = exc

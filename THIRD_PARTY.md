@@ -6,9 +6,9 @@ BreathingMove is copied from pollen-robotics/reachy_mini_conversation_app (Apach
 
 The app adapts the official queue/start and listening freeze/blend logic for a breathing-only primary move. Actual SDK feedback supplies the transition origin; acoustic heading is removed/reapplied as a separate application feature. Official random idle tools, dance/emotion queues and full tracking handoff are not copied. Speech still uses installed SDK HeadWobbler directly, with application PCM/timestamp feeding; this is not the complete official audio stack.
 
-Wake-facing behavior was studied in ha-china/Reachy_Mini_For_Home_Assistant and the referenced reachy_mini_home_assistant_custom Space. Our direction reader and single-loop heading controller are independently implemented; no source from those projects is bundled.
+The direction reader and single-loop heading controller are independently implemented.
 
-0.4.0 SDK audio ownership was informed by the ha-china reference implementation. No source was copied. The adapter uses SDK GStreamerAudio for capture, ALSA routing, and output; only decoding/mixing and LVA lifecycle adaptation are application code. SDK1.12 internal appsrc timestamps are isolated in sdk_audio.py because the SDK has no public playback-drained API.
+0.4.0: The adapter uses SDK GStreamerAudio for capture, ALSA routing, and output; only decoding/mixing and LVA lifecycle adaptation are application code. SDK1.12 internal appsrc timestamps are isolated in sdk_audio.py because the SDK has no public playback-drained API.
 
 0.5.0: LVA runs in a cancellable worker sharing the official application SDK media manager. No no_media clients or separate production audio backend. Parser arguments are injected without changing global argv; logging formatter changes stay local. HA/wake protocol unchanged.
 
