@@ -40,7 +40,10 @@ def test_normal_stop_cleans_child_and_returns_neutral(
     monkeypatch.setattr(app_module, "events", reader)
     stop = threading.Event()
     robot = Mock()
-    robot.set_target.side_effect = lambda **_: stop.set()
+    def send(**_):
+        assert threading.current_thread().name == 'ha-motion'
+        stop.set()
+    robot.set_target.side_effect = send
     app_module.ReachyMiniHaVoice().run(robot, stop)
     stop_child.assert_called_once_with(child)
     robot.start_head_tracking.assert_not_called()
@@ -51,6 +54,7 @@ def test_normal_stop_cleans_child_and_returns_neutral(
     assert robot.goto_target.call_args.kwargs["antennas"] == pytest.approx(
         [-0.1745, 0.1745])
     assert not any(t.name == "ha-voice-events" for t in threading.enumerate())
+    assert not any(t.name == "ha-motion" for t in threading.enumerate())
 
 
 def test_child_failure_is_visible_and_cleaned(app_module, monkeypatch, tmp_path):

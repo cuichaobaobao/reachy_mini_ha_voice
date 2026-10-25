@@ -58,6 +58,9 @@ class ReachyMiniHaVoice(ReachyMiniApp):
 
         motion = Motion(read_breathing_pose)
         link = MotionLink(reachy_mini)
+        motion_stop = threading.Event()
+        motion_errors = []
+        motion_thread = None
         awake = False
         try:
             reader.start()
@@ -66,52 +69,69 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             reachy_mini.goto_target(
                 head=create_head_pose(), antennas=list(NEUTRAL_ANTENNAS), body_yaw=0.0, duration=1.0
             )
-            if settings.get("head_tracking", False) is True:
-                reachy_mini.start_head_tracking(weight=1.0)
-            else:
-                reachy_mini.stop_head_tracking()
-            tracking = settings.get("head_tracking", False) is True
-            while not stop_event.is_set():
-                if process.poll() is not None:
-                    raise RuntimeError(
-                        f"LVA stopped with exit code {process.returncode}; see app logs"
-                    )
-                now = time.monotonic()
-                for _ in range(100):
-                    try:
-                        message = queue.get_nowait()
-                        was_listening = motion.state == "listening"
-                        motion.event(message, now)
-                        if motion.state == "listening" and not was_listening:
-                            try:
-                                _, antennas = reachy_mini.get_current_joint_positions()
-                                logging.getLogger(__name__).info(
-                                    "Listening measured antennas: right %.2f°, left %.2f°",
-                                    math.degrees(antennas[0]), math.degrees(antennas[1]))
-                            except Exception as exc:  # noqa: BLE001 - diagnostic SDK reads cannot stop voice
-                                logging.getLogger(__name__).warning("Listening telemetry unavailable: %s", exc)
-                        heading.event(message, now)
-                    except Empty:
-                        break
-                facing = heading.sample(now)
-                heading.report_measured(reachy_mini, now)
-                want_tracking = settings.get("head_tracking", False) is True and not heading.active
-                if tracking != want_tracking:
-                    if want_tracking:
+            def run_motion():
+                nonlocal facing
+                try:
+                    if settings.get("head_tracking", False) is True:
                         reachy_mini.start_head_tracking(weight=1.0)
                     else:
                         reachy_mini.stop_head_tracking()
-                    tracking = want_tracking
-                head, antennas = motion.sample(now)
-                if link.send(
-                    head=with_heading(head, facing),
-                    antennas=list(antennas),
-                    body_yaw=math.radians(facing),
-                ):
-                    motion.command_sent(antennas)
-                stop_event.wait(tick_delay(now, time.monotonic()))
+                    tracking = settings.get("head_tracking", False) is True
+                    while not stop_event.is_set() and not motion_stop.is_set():
+                        if process.poll() is not None:
+                            raise RuntimeError(
+                                f"LVA stopped with exit code {process.returncode}; see app logs"
+                            )
+                        now = time.monotonic()
+                        for _ in range(100):
+                            try:
+                                message = queue.get_nowait()
+                                was_listening = motion.state == "listening"
+                                motion.event(message, now)
+                                if motion.state == "listening" and not was_listening:
+                                    try:
+                                        _, antennas = reachy_mini.get_current_joint_positions()
+                                        logging.getLogger(__name__).info(
+                                            "Listening measured antennas: right %.2f°, left %.2f°",
+                                            math.degrees(antennas[0]), math.degrees(antennas[1]))
+                                    except Exception as exc:  # noqa: BLE001 - diagnostic SDK reads cannot stop voice
+                                        logging.getLogger(__name__).warning("Listening telemetry unavailable: %s", exc)
+                                heading.event(message, now)
+                            except Empty:
+                                break
+                        facing = heading.sample(now)
+                        heading.report_measured(reachy_mini, now)
+                        want_tracking = settings.get("head_tracking", False) is True and not heading.active
+                        if tracking != want_tracking:
+                            if want_tracking:
+                                reachy_mini.start_head_tracking(weight=1.0)
+                            else:
+                                reachy_mini.stop_head_tracking()
+                            tracking = want_tracking
+                        head, antennas = motion.sample(now)
+                        if link.send(
+                            head=with_heading(head, facing),
+                            antennas=list(antennas),
+                            body_yaw=math.radians(facing),
+                        ):
+                            motion.command_sent(antennas)
+                        motion_stop.wait(tick_delay(now, time.monotonic()))
+                except Exception as exc:  # noqa: BLE001 - propagate worker failure to supervisor.
+                    motion_errors.append(exc)
+                finally:
+                    motion_stop.set()
+
+            motion_thread = threading.Thread(target=run_motion, name="ha-motion")
+            motion_thread.start()
+            while not stop_event.is_set() and not motion_stop.wait(0.05):
+                pass
+            if motion_errors:
+                raise motion_errors[0]
         finally:
             reader_stop.set()
+            motion_stop.set()
+            if motion_thread is not None:
+                motion_thread.join()
             link.close()
             try:
                 stop_voice(process)

@@ -121,7 +121,7 @@ class SdkAudio:
                         if player.wobble:
                             speech[:len(pcm)] += pcm
                         count = max(count, len(pcm))
-                speaking = any(p.wobble and p.is_playing and not p.paused for p in self.players)
+                speaking = any(p.is_speech for p in self.players)
                 if speaking != self._speech:
                     (self.wobbler.start if speaking else self.wobbler.stop)()
                     self._speech = speaking

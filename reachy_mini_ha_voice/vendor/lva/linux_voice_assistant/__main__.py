@@ -448,7 +448,7 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         active_wake_words=active_wake_words,
         stop_word=stop_model,
         music_player=ReachyTtsPlayer(mic, wobble=False),
-        tts_player=ReachyTtsPlayer(mic),
+        tts_player=ReachyTtsPlayer(mic, wake_sound=args.wakeup_sound),
         wakeup_sound=args.wakeup_sound,
         start_listening_sound=args.start_listening_sound,
         timer_finished_sound=args.timer_finished_sound,

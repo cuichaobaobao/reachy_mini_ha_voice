@@ -31,6 +31,7 @@ def player_module(monkeypatch):
 def test_unstarted_sink_is_not_eof_and_real_eos_waits_for_speaker(player_module):
     module = player_module
     player = module.ReachyTtsPlayer.__new__(module.ReachyTtsPlayer)
+    player._wake = None
     player._pipeline = Mock()
     bus = player._pipeline.get_bus.return_value
     bus.pop_filtered.return_value = None
@@ -58,3 +59,84 @@ def test_unstarted_sink_is_not_eof_and_real_eos_waits_for_speaker(player_module)
     player.take(320, 2_000_000_000)
     player._clear.assert_called_once_with(flush=False)
     player._next.assert_called_once()
+
+
+def test_wake_file_uses_sdk_and_completion_runs_on_owner_loop(player_module, monkeypatch, tmp_path):
+    import asyncio
+    import threading
+
+    monkeypatch.setitem(sys.modules, 'soundfile', SimpleNamespace(
+        info=lambda _: SimpleNamespace(frames=480, samplerate=16000)))
+
+    async def run():
+        owner = threading.get_ident()
+        audio = SimpleNamespace(players=[], rate=16000, media=Mock(), backend=Mock(), flush=Mock())
+        wake = tmp_path / 'wake.flac'
+        player = player_module.ReachyTtsPlayer(audio, wake_sound=str(wake))
+        callbacks = []
+        player.set_volume(60)
+        def played(path):
+            assert threading.get_ident() != owner
+            assert path == str(wake)
+        audio.media.play_sound.side_effect = played
+        try:
+            for _ in range(3):
+                done = asyncio.Event()
+                def finished(done=done):
+                    callbacks.append(threading.get_ident())
+                    done.set()
+                player.play(str(wake), finished)
+                assert player.is_playing and not player.is_speech
+                assert len(player.take(320, 0)) == 0  # Never enters PCM mixer.
+                await asyncio.wait_for(done.wait(), 1)
+                assert not player.is_playing
+            assert callbacks == [owner] * 3
+            assert audio.media.play_sound.call_count == 3
+            audio.backend._playbin.set_property.assert_called_with('volume', .6)
+            audio.flush.assert_not_called()
+            # Only the configured chime uses direct playback; TTS stays decoded.
+            player._wake_path = None
+            player._next = Mock()
+            player.play('https://ha.example/tts.mp3')
+            assert player._urls == ['https://ha.example/tts.mp3']
+            player._next.assert_called_once()
+        finally:
+            player.close()
+        assert not any(t.name == 'ha-wake-sound' for t in threading.enumerate())
+    asyncio.run(run())
+
+
+def test_wake_cancel_and_replacement_cannot_start_obsolete_listening(player_module, monkeypatch, tmp_path):
+    import asyncio
+    import threading
+
+    monkeypatch.setitem(sys.modules, 'soundfile', SimpleNamespace(
+        info=lambda _: SimpleNamespace(frames=1600, samplerate=16000)))
+
+    async def run():
+        audio = SimpleNamespace(players=[], rate=16000, media=Mock(), backend=Mock(), flush=Mock())
+        wake = str(tmp_path / 'wake.flac')
+        player = player_module.ReachyTtsPlayer(audio, wake_sound=wake)
+        calls = []
+        try:
+            player.play(wake, lambda: calls.append('cancelled'))
+            await asyncio.sleep(.02)
+            player.stop()
+            await asyncio.sleep(.12)
+            assert calls == []
+            audio.backend._playbin.set_state.assert_called_with(player_module.Gst.State.NULL)
+            player.play(wake, lambda: calls.append('replaced'))
+            await asyncio.sleep(.02)
+            player.play(wake, lambda: calls.append('current'))
+            await asyncio.sleep(.2)
+            assert calls == ['current']
+            # Even a completion already queued on the owner loop is invalidated.
+            player.play(wake, lambda: calls.append('closed'))
+            previous = player._wake
+            player.close()
+            player._wake_finished(previous, None)
+            assert calls == ['current']
+            assert not any(t.name == 'ha-wake-sound' for t in threading.enumerate())
+        finally:
+            player.close()
+    asyncio.run(run())

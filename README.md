@@ -80,7 +80,8 @@ curl -X POST http://ROBOT_IP:8000/api/apps/install \
 
 ## 工作原理与边界
 
-- 保留 OHF 的 [Linux Voice Assistant](https://github.com/OHF-Voice/linux-voice-assistant) 运行时、ESPHome API、mDNS、本地唤醒模型与播放逻辑，通过其公开 peripheral WebSocket 事件驱动单个 60 Hz 控制循环。
+- 保留 OHF 的 [Linux Voice Assistant](https://github.com/OHF-Voice/linux-voice-assistant) 运行时、ESPHome API、mDNS 和本地唤醒模型；其公开 peripheral WebSocket 事件经队列交给专用动作线程，统一执行单个 60 Hz 控制循环。
+- 唤醒提示音对齐案例的本地文件播放方式：专用线程调用 SDK `media.play_sound()`，按文件时长等待后通知 LVA 开始聆听；取消不会触发过期回调。时长等待不是声卡播放完成确认。其他提示音和 TTS 不走这条专用路径。
 - 动作用法参考 [Reachy Mini 官方对话应用](https://github.com/pollen-robotics/reachy_mini_conversation_app)：单一控制入口、平滑转换、聆听仅冻结天线并保留已运行的呼吸。
 - TTS 播放 HA 返回的音频 URL，解码 PCM 经共享 SDK 音频后端输出，并按 SDK 播放时钟交给官方 `HeadWobbler/SwayRollRT`，通过官方 `SetSpeechOffsetsCmd` 叠加到头部。音乐同样走 GStreamer，但不驱动头部动作。无需 OpenAI API key。
 - 为保留 URL 播放与完成回调，音频适配层由本应用实现；复用官方音频分析与定时摆动算法，但不是复制整个官方对话应用。SDK 固定 `>=1.12,<1.13`，因为播放排空时钟使用该版本的内部接口。

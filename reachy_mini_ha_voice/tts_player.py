@@ -14,6 +14,8 @@ import numpy as np
 gi.require_version("Gst", "1.0")
 from gi.repository import Gst
 
+from .wake_sound import WakeSound
+
 _LOG = logging.getLogger(__name__)
 
 
@@ -28,9 +30,11 @@ def on_owner(method):
 
 
 class ReachyTtsPlayer:
-    def __init__(self, audio, wobble=True):
+    def __init__(self, audio, wobble=True, wake_sound=None):
         self.audio = audio
         self.wobble = wobble
+        self._wake_path = Path(wake_sound).resolve() if wake_sound else None
+        self._wake = None
         self._owner = threading.get_ident()
         self._async_loop = asyncio.get_running_loop()
         self._pipeline = None
@@ -55,7 +59,11 @@ class ReachyTtsPlayer:
 
     @property
     def is_playing(self):
-        return self._pipeline is not None
+        return self._pipeline is not None or self._wake is not None
+
+    @property
+    def is_speech(self):
+        return self.wobble and self.is_playing and self._wake is None and not self.paused
 
     @on_owner
     def play(self, url, done_callback=None, stop_first=False):
@@ -72,6 +80,14 @@ class ReachyTtsPlayer:
                 callback()
             return
         url = self._urls.pop(0)
+        if self._wake_path is not None and not urlparse(url).scheme and Path(url).resolve() == self._wake_path:
+            playback = WakeSound(
+                self.audio, str(self._wake_path), self.gain,
+                lambda error: self._async_loop.call_soon_threadsafe(self._wake_finished, playback, error),
+            )
+            self._wake = playback
+            playback.start()
+            return
         if not urlparse(url).scheme:
             url = Path(url).resolve().as_uri()
         self._decoder_eos = False
@@ -93,6 +109,15 @@ class ReachyTtsPlayer:
         if self._pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self._failed("Cannot start audio decoder")
 
+    def _wake_finished(self, playback, error):
+        # Cancellation/replacement may already have invalidated this callback.
+        if self._wake is not playback:
+            return
+        self._wake = None
+        if error is not None:
+            _LOG.error("Wake sound playback failed: %s", error)
+        self._next()
+
     def _failed(self, reason):
         _LOG.error("Audio playback failed: %s", reason)
         self._clear(flush=True)
@@ -101,7 +126,7 @@ class ReachyTtsPlayer:
 
     def take(self, frames, now):
         self._contributed = False
-        if not self.is_playing or self.paused:
+        if self._pipeline is None or self.paused:
             return np.empty(0, dtype=np.float32)
         bus = self._pipeline.get_bus()
         while message := bus.pop_filtered(Gst.MessageType.ERROR | Gst.MessageType.EOS):
@@ -136,6 +161,9 @@ class ReachyTtsPlayer:
         return result
 
     def _clear(self, flush):
+        if self._wake is not None:
+            playback, self._wake = self._wake, None
+            playback.stop()
         if self._pipeline is not None:
             self._pipeline.set_state(Gst.State.NULL)
             if flush:
@@ -146,10 +174,11 @@ class ReachyTtsPlayer:
 
     @on_owner
     def stop(self):
+        was_wake = self._wake is not None
         self._clear(flush=True)
         self._urls = []
         callback, self._callback = self._callback, None
-        if callback:
+        if callback and not was_wake:
             callback()
 
     @on_owner
@@ -165,14 +194,20 @@ class ReachyTtsPlayer:
     @on_owner
     def set_volume(self, volume):
         self._volume = max(0.0, min(1.0, volume / 100))
+        if self._wake is not None:
+            self._wake.set_gain(self.gain)
 
     @on_owner
     def duck(self, factor=0.5):
         self._duck = max(0.0, min(1.0, factor))
+        if self._wake is not None:
+            self._wake.set_gain(self.gain)
 
     @on_owner
     def unduck(self):
         self._duck = 1.0
+        if self._wake is not None:
+            self._wake.set_gain(self.gain)
 
     @on_owner
     def close(self):
