@@ -22,8 +22,8 @@ jobs:
       - run: reachy-mini-app-assistant check .
       - name: Test SDK audio without PulseAudio and real ESPHome runtime
         run: |
+          python scripts/smoke_wake_sound.py
           python scripts/smoke_linux.py
           python scripts/smoke_tts.py
-          python scripts/smoke_wake_sound.py
           python scripts/smoke_direction.py
           python scripts/smoke_motion_link.py
