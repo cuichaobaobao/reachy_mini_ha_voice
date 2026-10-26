@@ -28,32 +28,45 @@ jobs:
           python scripts/smoke_direction.py
           python scripts/smoke_motion_link.py
   release:
-    # A vX.Y.Z tag publishes only after the full Linux suite above has passed.
-    if: startsWith(github.ref, 'refs/tags/v')
+    # A version in pyproject.toml without a matching vX.Y.Z tag is published from
+    # main only after the full Linux suite above has passed. Other pushes only test.
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: linux
     runs-on: ubuntu-latest
+    concurrency: release
     permissions:
       contents: write
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Check tag matches package version
+      - name: Find unreleased version
+        id: version
         run: |
           version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
-          test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+          echo "tag=v$version" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$version" >/dev/null; then
+            echo "v$version is already released; nothing to publish."
+          else
+            echo "publish=true" >> "$GITHUB_OUTPUT"
+          fi
       - name: Sync Hugging Face Space
+        if: steps.version.outputs.publish == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
           pip install 'huggingface_hub>=2,<3'
-          python scripts/sync_hf_space.py "$GITHUB_REF_NAME"
-      - name: Create GitHub release from CHANGELOG
+          python scripts/sync_hf_space.py "${{ steps.version.outputs.tag }}"
+      - name: Tag and create GitHub release from CHANGELOG
+        if: steps.version.outputs.publish == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
         run: |
-          awk -v v="## ${GITHUB_REF_NAME#v}" '$0 == v {found=1; print; next} found && /^## / {exit} found' CHANGELOG.md > notes.md
-          test -s notes.md || { echo "No CHANGELOG section for $GITHUB_REF_NAME"; exit 1; }
+          awk -v v="## ${TAG#v}" '$0 == v {found=1; print; next} found && /^## / {exit} found' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "No CHANGELOG section for $TAG"; exit 1; }
           printf '\n完整记录见 [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md)。\n' "$GITHUB_REPOSITORY" >> notes.md
-          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md
