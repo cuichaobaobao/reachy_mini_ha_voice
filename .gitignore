@@ -1,12 +1,10 @@
 __pycache__/
 *.egg-info/
-build/.work/
-.env
-config.json
-preferences.json
-__pycache__/
-*.egg-info/
 build/
 dist/
 .pytest_cache/
 .ruff_cache/
+.env
+config.json
+preferences.json
+.DS_Store
