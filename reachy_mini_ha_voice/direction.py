@@ -3,9 +3,10 @@
 Uses the active SDK audio owner's DOA when supplied, otherwise the daemon. No network request
 runs on the wake-word/audio thread. A missing/old reading never delays Assist.
 
-The array's raw angle is noisy (single-sample jumps of tens of degrees, 0/pi wraparound),
-so a wake snapshot is the circular median of the last SPEECH_WINDOW seconds of speech
-samples, falling back to all recent samples when the hardware VAD never flagged the word.
+The array's raw angle is noisy (single-sample jumps of tens of degrees), so a wake
+snapshot is the median of the last SPEECH_WINDOW seconds of speech samples. DOA is a
+linear 0..pi scale (0 = left, pi = right), so the two ends are opposite, not adjacent.
+Without any speech-flagged sample the reading is dominated by room noise and is dropped.
 """
 import json
 import logging
@@ -33,7 +34,7 @@ def _unwrap(values, period):
 
 
 def circular_median(values, period):
-    """Median on a circle; period is pi for DOA and 2*pi for a yaw."""
+    """Median on a circle, used for the 2*pi-periodic head yaw."""
     unwrapped = _unwrap(values, period)
     if max(unwrapped) - min(unwrapped) < 1e-12:
         return values[0]
@@ -41,8 +42,7 @@ def circular_median(values, period):
 
 
 def _spread_degrees(angles):
-    unwrapped = _unwrap(angles, math.pi)
-    return math.degrees(max(unwrapped) - min(unwrapped))
+    return math.degrees(max(angles) - min(angles))
 
 
 class DirectionReader:
@@ -93,14 +93,15 @@ class DirectionReader:
         elif speech:
             # One or two voice-flagged frames are too few on their own: keep
             # them as the seed and add nearby frames of the same utterance.
-            seed = circular_median([s["angle"] for s in speech], math.pi)
-            pool = [s for s in recent
-                    if abs(((s["angle"] - seed + math.pi / 2) % math.pi) - math.pi / 2) <= SEED_CLUSTER]
+            seed = statistics.median(s["angle"] for s in speech)
+            pool = [s for s in recent if abs(s["angle"] - seed) <= SEED_CLUSTER]
             pool = pool or speech
             source = "mixed"
         else:
-            pool, source = recent, "recent"
-        angle = circular_median([s["angle"] for s in pool], math.pi)
+            _LOG.info("Wake direction skipped: no speech-flagged samples in %d recent readings",
+                      len(recent))
+            return {}
+        angle = statistics.median(s["angle"] for s in pool)
         yaw = circular_median([s["head_yaw"] for s in pool], 2 * math.pi)
         if yaw > math.pi:
             yaw -= 2 * math.pi

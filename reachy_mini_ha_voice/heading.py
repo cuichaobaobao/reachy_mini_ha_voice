@@ -2,8 +2,27 @@
 
 import logging
 import math
+from itertools import pairwise
 
 _LOG = logging.getLogger(__name__)
+
+
+# The microphone array under-reports off-axis sources: measured on the robot, a
+# speaker at 45 degrees reads about 20 degrees and one at 90 degrees about 54.
+# Piecewise-linear (raw, corrected) knots in degrees; symmetric, capped at 90.
+DOA_CORRECTION = ((0.0, 0.0), (20.0, 45.0), (54.0, 90.0))
+
+
+def corrected_relative(raw):
+    """Map a raw DOA-relative angle (degrees) onto the speaker's actual bearing."""
+    magnitude = abs(raw)
+    for (x0, y0), (x1, y1) in pairwise(DOA_CORRECTION):
+        if magnitude <= x1:
+            value = y0 + (magnitude - x0) * (y1 - y0) / (x1 - x0)
+            break
+    else:
+        value = DOA_CORRECTION[-1][1]
+    return math.copysign(value, raw)
 
 
 class Heading:
@@ -68,18 +87,20 @@ class Heading:
                     if not 0 <= age <= 1.0 or not 0 <= angle <= math.pi:
                         _LOG.info("Wake turn skipped: sample age %.3fs, DOA %.3f rad", age, angle)
                         return
-                    relative = 90.0 - math.degrees(angle)
-                    if abs(relative) < 3.0:
-                        _LOG.info("Wake turn skipped: relative %.1f° inside 3° deadband", relative)
+                    raw = 90.0 - math.degrees(angle)
+                    # Deadband on the raw reading so front-facing noise is not amplified.
+                    if abs(raw) < 3.0:
+                        _LOG.info("Wake turn skipped: relative %.1f° inside 3° deadband", raw)
                         return
+                    relative = corrected_relative(raw)
                     target = max(-self.BODY_YAW_LIMIT, min(self.BODY_YAW_LIMIT, measured_yaw + relative))
                     duration = max(0.65, min(1.25, abs(target - self.yaw) / 75.0))
-                    _LOG.info("Wake turn: DOA %.1f°, relative %.1f°, measured head %.1f°, "
-                              "head/body target %.1f°, sample age %.3fs, duration %.2fs, "
-                              "direction=%s(%s samples, spread %.1f°)",
-                              math.degrees(angle), relative, measured_yaw, target, age, duration,
-                              reading.get("source", "instant"), reading.get("samples", 1),
-                              reading.get("spread", 0.0))
+                    _LOG.info("Wake turn: DOA %.1f°, raw relative %.1f°, corrected %.1f°, "
+                              "measured head %.1f°, head/body target %.1f°, sample age %.3fs, "
+                              "duration %.2fs, direction=%s(%s samples, spread %.1f°)",
+                              math.degrees(angle), raw, relative, measured_yaw, target, age,
+                              duration, reading.get("source", "instant"),
+                              reading.get("samples", 1), reading.get("spread", 0.0))
                     self._turn(target, now, duration)
                     self._report = (now + duration + 0.3, target)
                 except (KeyError, TypeError, ValueError):

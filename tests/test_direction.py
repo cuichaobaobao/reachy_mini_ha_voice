@@ -23,23 +23,24 @@ def test_speech_median_rejects_a_noise_spike():
     assert direction["angle"] == pytest.approx(1.19, abs=0.05)
 
 
-def test_median_survives_the_zero_pi_wraparound():
+def test_left_and_right_ends_are_opposite_not_adjacent():
+    # 0 is left and pi is right: conflicting ends must not collapse onto either side.
     now = [10.0]
     reader = DirectionReader(clock=lambda: now[0])
-    for angle in (3.12, 3.10, 0.02, 0.01):
+    for angle in (0.02, 0.03, 1.00, 3.10, 3.12):
         reader.update(reading(angle), now[0])
-    angle = reader.snapshot()["direction"]["angle"]
-    assert min(angle, math.pi - angle) < 0.1
+    direction = reader.snapshot()["direction"]
+    assert direction["angle"] == pytest.approx(1.00)
+    assert direction["spread"] == pytest.approx(math.degrees(3.10))
 
 
-def test_no_speech_samples_fall_back_to_recent_values():
+def test_no_speech_samples_skip_the_turn():
+    # Unflagged frames follow room noise rather than the speaker.
     now = [10.0]
     reader = DirectionReader(clock=lambda: now[0])
     for angle in (0.90, 0.92, 0.88):
         reader.update(reading(angle, speech=False), now[0])
-    direction = reader.snapshot()["direction"]
-    assert direction["source"] == "recent"
-    assert direction["angle"] == pytest.approx(0.90, abs=0.05)
+    assert reader.snapshot() == {}
 
 
 def test_samples_older_than_the_window_are_ignored():

@@ -1,20 +1,53 @@
 import math
+from itertools import pairwise
 
 import pytest
 
 from reachy_mini_ha_voice.direction import DirectionReader
-from reachy_mini_ha_voice.heading import Heading
+from reachy_mini_ha_voice.heading import DOA_CORRECTION, Heading, corrected_relative
+
+
+def raw_for(turn):
+    """Raw DOA-relative angle that the correction maps onto ``turn`` degrees."""
+    for (x0, y0), (x1, y1) in pairwise(DOA_CORRECTION):
+        if abs(turn) <= y1:
+            return math.copysign(x0 + (abs(turn) - y0) * (x1 - x0) / (y1 - y0), turn)
+    raise ValueError(turn)
 
 
 def wake(now, relative=30, measured=0):
+    """Wake event whose corrected turn is ``relative`` degrees."""
     return {"event": "wake_word_detected", "data": {"direction": {
-        "angle": math.radians(90 - relative),
+        "angle": math.radians(90 - raw_for(relative)),
         "head_yaw": math.radians(measured), "sampled_at": now,
     }}}
 
 
+def raw_wake(now, raw, measured=0):
+    return {"event": "wake_word_detected", "data": {"direction": {
+        "angle": math.radians(90 - raw),
+        "head_yaw": math.radians(measured), "sampled_at": now,
+    }}}
+
+
+@pytest.mark.parametrize("raw,turn", [
+    (0, 0), (10, 22.5), (20, 45), (37, 67.5), (54, 90), (70, 90), (90, 90),
+    (-20, -45), (-54, -90), (-90, -90),
+])
+def test_doa_correction_follows_measured_knots(raw, turn):
+    assert corrected_relative(raw) == pytest.approx(turn)
+
+
+def test_deadband_applies_to_raw_reading_before_correction():
+    h = Heading()
+    h.event(raw_wake(10, 2.9), 10)  # Would be 6.5 degrees once corrected.
+    assert h.sample(12) == 0
+    h.event(raw_wake(20, -20), 20)
+    assert h.sample(22) == pytest.approx(-45)
+
+
 def test_full_angle_duration_and_deadband():
-    for relative, duration in [(2, None), (5, .65), (30, .65), (40, .65), (90, 1.2)]:
+    for relative, duration in [(2, None), (8, .65), (30, .65), (40, .65), (90, 1.2)]:
         h = Heading()
         h.event(wake(10, relative), 10)
         if duration is None:
@@ -210,7 +243,8 @@ def test_sdk_pose_sampler_has_no_http_and_follows_new_source():
         assert first['direction']['head_yaw'] == pytest.approx(math.radians(30))
         h = Heading()
         h.event({'event': 'wake_word_detected', 'data': first}, time.monotonic())
-        assert h.sample(time.monotonic() + 2) == pytest.approx(90)
+        # DOA 30 degrees is raw +60, corrected to +90, on top of the measured 30.
+        assert h.sample(time.monotonic() + 2) == pytest.approx(120)
         values[:] = [math.pi, math.radians(90)]
         for _ in range(400):
             latest = reader.snapshot()
