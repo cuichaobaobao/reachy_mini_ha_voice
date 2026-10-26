@@ -99,7 +99,7 @@ reachy-mini-app-assistant check .
 
 本地直接运行 `python -m reachy_mini_ha_voice.main` 会连接机器人并启动语音，不应与 Dashboard 中已启动的同一应用同时运行。
 
-源码以 GitHub 为主，检查通过后同步到 Hugging Face。上游版本与许可见 `THIRD_PARTY.md`，测试与环境说明见 `TESTING.md`。
+源码以 GitHub 为主。发布时推送与 `pyproject.toml` 版本一致的 `vX.Y.Z` 标签：CI 全部通过后自动同步 Hugging Face Space（需要仓库密钥 `HF_TOKEN`，仅对该 Space 有写权限），再按 `CHANGELOG.md` 对应段落创建 GitHub Release。普通推送只运行测试。上游版本与许可见 `THIRD_PARTY.md`，测试与环境说明见 `TESTING.md`。
 
 ## 变更记录
 

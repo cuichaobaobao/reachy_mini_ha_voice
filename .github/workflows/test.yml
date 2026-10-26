@@ -27,3 +27,33 @@ jobs:
           python scripts/smoke_tts.py
           python scripts/smoke_direction.py
           python scripts/smoke_motion_link.py
+  release:
+    # A vX.Y.Z tag publishes only after the full Linux suite above has passed.
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: linux
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Check tag matches package version
+        run: |
+          version=$(python -c "import tomllib; print(tomllib.load(open('pyproject.toml','rb'))['project']['version'])")
+          test "v$version" = "$GITHUB_REF_NAME" || { echo "Tag $GITHUB_REF_NAME does not match version $version"; exit 1; }
+      - name: Sync Hugging Face Space
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          pip install 'huggingface_hub>=2,<3'
+          python scripts/sync_hf_space.py "$GITHUB_REF_NAME"
+      - name: Create GitHub release from CHANGELOG
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          awk -v v="## ${GITHUB_REF_NAME#v}" '$0 == v {found=1; print; next} found && /^## / {exit} found' CHANGELOG.md > notes.md
+          test -s notes.md || { echo "No CHANGELOG section for $GITHUB_REF_NAME"; exit 1; }
+          printf '\n完整记录见 [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md)。\n' "$GITHUB_REPOSITORY" >> notes.md
+          gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
