@@ -53,3 +53,42 @@ def test_wobbler_connection_loss_is_cosmetic_not_audio_failure(monkeypatch):
     audio._robot = Mock()
     audio._robot.client.send_command.side_effect = ConnectionError('lost heartbeat')
     audio._offsets([0] * 6)  # Must also allow wobbler.stop() during cleanup.
+
+
+def test_render_loop_idles_until_a_player_starts():
+    import asyncio
+    from types import SimpleNamespace
+
+    async def scenario():
+        audio = SdkAudio.__new__(SdkAudio)
+        audio.closed = threading.Event()
+        audio._capture_failed = threading.Event()
+        audio._activity = asyncio.Event()
+        audio._speech = False
+        audio.players = []
+        audio.rate = 16000
+        audio.wobbler = Mock()
+        audio.backend = SimpleNamespace(_appsrc_pts=0)
+        audio.media = Mock()
+        audio.media.get_output_channels.return_value = 2
+        ticks = []
+        audio.clock = lambda: (ticks.append(1), (10_000_000_000, 0))[1]
+        task = asyncio.create_task(audio._render())
+        await asyncio.sleep(0.1)
+        assert not ticks  # No 5 ms polling while nothing plays.
+        player = SimpleNamespace(rendering=True, is_speech=False, wobble=False, gain=1.0,
+                                 _contributed=False, _audible_until=0,
+                                 take=lambda frames, now: np.empty(0, dtype=np.float32))
+        audio.players.append(player)
+        audio.wake()
+        await asyncio.sleep(0.05)
+        assert ticks  # Woken immediately, not after the idle timeout.
+        player.rendering = False
+        await asyncio.sleep(0.05)
+        idle_ticks = len(ticks)
+        await asyncio.sleep(0.1)
+        assert len(ticks) == idle_ticks
+        audio.closed.set()
+        await asyncio.wait_for(task, 1)
+
+    asyncio.run(scenario())

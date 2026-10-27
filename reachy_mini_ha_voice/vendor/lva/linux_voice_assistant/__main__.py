@@ -9,12 +9,10 @@ import signal
 import threading
 import time
 from pathlib import Path
-from queue import Queue
-from typing import List, Optional, Union
+from typing import Any, List, Optional, Union
 
 import numpy as np
 from aioesphomeapi.api_pb2 import NumberStateResponse  # type: ignore  # pylint: disable=no-name-in-module
-from getmac import get_mac_address  # type: ignore
 from pymicro_wakeword import MicroWakeWord, MicroWakeWordFeatures
 from pyopen_wakeword import OpenWakeWord, OpenWakeWordFeatures
 
@@ -29,12 +27,16 @@ from .util import (
     get_default_ipv4,
     get_esphome_version,
     get_version,
+    resolve_mac_address,
 )
 from .wake_word import find_available_wake_words, load_stop_model, load_wake_models
 from .webrtc import WebRTCProcessor
 from .zeroconf import HomeAssistantZeroconf
 
 _LOGGER = logging.getLogger(__name__)
+
+_LOG_FORMAT = "%(asctime)s.%(msecs)03d %(levelname)s:%(name)s:%(message)s"
+_LOG_DATE_FORMAT = "%Y-%m-%d %H:%M:%S"
 _MODULE_DIR = Path(__file__).parent
 _REPO_DIR = _MODULE_DIR.parent
 _WAKEWORDS_DIR = _REPO_DIR / "wakewords"
@@ -168,6 +170,11 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         help="Sound to play when unmuting the assistant",
     )
     parser.add_argument(
+        "--pipeline-ended-sound",
+        default=str(_SOUNDS_DIR / "pipeline_ended_low.flac"),
+        help="Sound to play when the voice pipeline ends without a response (e.g. no speech detected)",
+    )
+    parser.add_argument(
         "--button-double-press-sound",
         default=str(_SOUNDS_DIR / "button_double_press.flac"),
         help="Sound to play for button double press",
@@ -194,6 +201,12 @@ async def run_voice(owner, argv=None, robot=None) -> None:
     parser.add_argument(
         "--network-interface",
         help="Network interface the application listens on (default: auto-detected by gateway)",
+    )
+    parser.add_argument(
+        "--mac-address",
+        help="MAC address the device is known by in Home Assistant, e.g. 02:00:00:00:00:01 "
+        "(default: the network interface's). Set it to keep one identity across interfaces, "
+        "or to run several instances on one machine",
     )
     # Note that default port is also set in docker-entrypoint.sh
     parser.add_argument(
@@ -273,9 +286,9 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         args.debug = True
         _setup_logging(args)
     elif args.debug:
-        logging.basicConfig(level=logging.DEBUG)
+        logging.basicConfig(level=logging.DEBUG, format=_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT)
     else:
-        logging.basicConfig(level=logging.INFO)
+        logging.basicConfig(level=logging.INFO, format=_LOG_FORMAT, datefmt=_LOG_DATE_FORMAT)
 
     _LOGGER.debug(args)
     if args.list_input_devices:
@@ -311,9 +324,13 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         host_ip_address = args.host
 
     # Resolve mac
-    if not (mac_address := get_mac_address(interface=network_interface)):
-        print("No Mac address was found, app stopped.")
+    try:
+        mac_address = resolve_mac_address(args.mac_address, network_interface)
+    except ValueError as err:
+        print(f"{err}, app stopped.")
         sys.exit(1)
+    if args.mac_address:
+        print(f"Using MAC address: {mac_address}")
     mac_address_clean = mac_address.replace(":", "").lower()
 
     # Resolve name
@@ -377,7 +394,7 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         _LOGGER.debug("Loading preferences: %s", preferences_path)
         with open(preferences_path, "r", encoding="utf-8") as preferences_file:
             preferences_dict = json.load(preferences_file)
-            preferences = Preferences(**preferences_dict)
+            preferences = Preferences.from_dict(preferences_dict)
     else:
         preferences = Preferences()
 
@@ -441,7 +458,6 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         ip_address=host_ip_address,
         version=version,
         esphome_version=esphome_version,
-        audio_queue=Queue(),
         entities=[],
         available_wake_words=available_wake_words,
         wake_words=wake_models,
@@ -455,6 +471,7 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         processing_sound=args.processing_sound,
         mute_sound=args.mute_sound,
         unmute_sound=args.unmute_sound,
+        pipeline_ended_sound=args.pipeline_ended_sound,
         button_double_press_sound=args.button_double_press_sound,
         button_triple_press_sound=args.button_triple_press_sound,
         button_long_press_sound=args.button_long_press_sound,
@@ -632,7 +649,6 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         state.wake_direction_reader.close()
         state.tts_player.close()
         state.music_player.close()
-        state.audio_queue.put_nowait(None)
         process_audio_thread.join(timeout=3)
         await discovery._aiozc.async_unregister_all_services()
         await discovery._aiozc.async_close()
@@ -665,7 +681,7 @@ def _setup_logging(args: argparse.Namespace) -> None:
     handler = logging.StreamHandler()
     handler.setFormatter(
         ColorFormatter(
-            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            fmt="%(asctime)s.%(msecs)03d %(levelname)s %(name)s: %(message)s",
             datefmt="%H:%M:%S",
         )
     )
@@ -707,8 +723,7 @@ def process_audio(state: ServerState, mic, block_size: int):
                 channel_chunks: list[bytes] = []
                 for ch in range(n_channels):
                     col = raw[:, ch] if n_channels > 1 else raw.reshape(-1)
-                    chunk = (np.clip(col * mic_vol_scalar, -1.0, 1.0) * 32767.0).astype("<i2").tobytes()
-                    channel_chunks.append(chunk)
+                    channel_chunks.append(_float_to_pcm16(col, mic_vol_scalar))
 
                 # Primary channel drives WebRTC and wake-word detection.
                 audio_chunk = channel_chunks[0]
@@ -731,7 +746,7 @@ def process_audio(state: ServerState, mic, block_size: int):
                 if (not wake_words) or (state.wake_words_changed and state.wake_words):
                     # Update list of wake word models to process
                     state.wake_words_changed = False
-                    wake_words = [ww for ww in state.wake_words.values() if ww.id in state.active_wake_words]
+                    wake_words = [ww for ww_id, ww in state.wake_words.items() if ww_id in state.active_wake_words]
 
                     # TODO: Load default stop word value from json into state and preferences missing.
 
@@ -739,7 +754,7 @@ def process_audio(state: ServerState, mic, block_size: int):
                     for idx, wake_word in enumerate(wake_words):
 
                         # Load default threshold from model json
-                        wake_word_id = wake_word.id if hasattr(wake_word, "id") else next(iter(state.wake_words.keys()))
+                        wake_word_id = next((ww_id for ww_id, ww in state.wake_words.items() if ww is wake_word), "")
                         available_word = state.available_wake_words.get(wake_word_id)
                         # _LOGGER.debug("word= %s", state.available_wake_words.get(wake_word_id))
                         default_threshold = available_word.probability_cutoff if available_word else 0.7
@@ -890,6 +905,18 @@ def process_audio(state: ServerState, mic, block_size: int):
 
 
 # -----------------------------------------------------------------------------
+
+
+def _float_to_pcm16(samples: np.ndarray, scalar: float) -> bytes:
+    """
+    Scale float samples in [-1, 1] and convert them to little-endian 16-bit PCM bytes.
+    :param samples: Float32 samples of a single channel.
+    :param scalar: Gain applied before clipping.
+    """
+    scaled = samples * scalar
+    np.clip(scaled, -1.0, 1.0, out=scaled)
+    scaled *= 32767.0
+    return scaled.astype("<i2").tobytes()
 
 
 def run():

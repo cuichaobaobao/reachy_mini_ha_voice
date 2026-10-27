@@ -22,7 +22,7 @@ async def main():
     from gi.repository import Gst
     from unittest.mock import Mock
     Gst.init(None)
-    cold_audio = SimpleNamespace(players=[], rate=16000, flush=Mock())
+    cold_audio = SimpleNamespace(players=[], rate=16000, flush=Mock(), wake=Mock())
     cold = ReachyTtsPlayer(cold_audio)
     cold._pipeline = Gst.Pipeline.new("cold-regression")
     cold._sink = Gst.ElementFactory.make("appsink")

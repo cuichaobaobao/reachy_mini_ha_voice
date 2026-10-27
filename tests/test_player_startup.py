@@ -70,7 +70,7 @@ def test_wake_file_uses_sdk_and_completion_runs_on_owner_loop(player_module, mon
 
     async def run():
         owner = threading.get_ident()
-        audio = SimpleNamespace(players=[], rate=16000, media=Mock(), backend=Mock(), flush=Mock())
+        audio = SimpleNamespace(players=[], rate=16000, media=Mock(), backend=Mock(), flush=Mock(), wake=Mock())
         wake = tmp_path / 'wake.flac'
         player = player_module.ReachyTtsPlayer(audio, wake_sound=str(wake))
         callbacks = []
@@ -114,7 +114,7 @@ def test_wake_cancel_and_replacement_cannot_start_obsolete_listening(player_modu
         info=lambda _: SimpleNamespace(frames=1600, samplerate=16000)))
 
     async def run():
-        audio = SimpleNamespace(players=[], rate=16000, media=Mock(), backend=Mock(), flush=Mock())
+        audio = SimpleNamespace(players=[], rate=16000, media=Mock(), backend=Mock(), flush=Mock(), wake=Mock())
         wake = str(tmp_path / 'wake.flac')
         player = player_module.ReachyTtsPlayer(audio, wake_sound=wake)
         calls = []

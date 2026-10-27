@@ -62,6 +62,16 @@ class ReachyTtsPlayer:
         return self._pipeline is not None or self._wake is not None
 
     @property
+    def rendering(self):
+        """True while the shared render loop must pull decoded audio from this player."""
+        return self._pipeline is not None and not self.paused
+
+    @property
+    def is_paused(self):
+        # Same meaning as upstream LVA players: loaded but paused.
+        return self.paused and self.is_playing
+
+    @property
     def is_speech(self):
         return self.wobble and self.is_playing and self._wake is None and not self.paused
 
@@ -108,6 +118,8 @@ class ReachyTtsPlayer:
         self._pipeline.set_property("video-sink", Gst.ElementFactory.make("fakesink"))
         if self._pipeline.set_state(Gst.State.PLAYING) == Gst.StateChangeReturn.FAILURE:
             self._failed("Cannot start audio decoder")
+            return
+        self.audio.wake()
 
     def _wake_finished(self, playback, error):
         # Cancellation/replacement may already have invalidated this callback.
@@ -190,6 +202,7 @@ class ReachyTtsPlayer:
     @on_owner
     def resume(self):
         self.paused = False
+        self.audio.wake()
 
     @on_owner
     def set_volume(self, volume):

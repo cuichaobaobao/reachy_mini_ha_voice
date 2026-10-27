@@ -33,6 +33,7 @@ class SdkAudio:
         self._offset_callback = offset_callback
         self.wobbler = HeadWobbler(self._offsets, sample_rate=self.rate)
         self._speech = False
+        self._activity = asyncio.Event()
         self._input = np.empty((0, 1), dtype=np.float32)
         self.media.start_recording()
         self.media.start_playing()
@@ -83,6 +84,10 @@ class SdkAudio:
     def fail_capture(self):
         self._capture_failed.set()
 
+    def wake(self):
+        """Resume rendering after a player starts or resumes (call on the owner loop)."""
+        self._activity.set()
+
     def clock(self):
         # SDK 1.12 exposes no public playback-drained API. Keep its timing
         # dependency here: AudioBase stamps _appsrc_pts in pipeline running time.
@@ -105,6 +110,18 @@ class SdkAudio:
             while not self.closed.is_set():
                 if self._capture_failed.is_set():
                     raise RuntimeError("SDK microphone capture failed; see preceding traceback")
+                if not any(player.rendering for player in self.players):
+                    # Nothing to mix: wait for a player instead of polling every 5 ms.
+                    # The timeout keeps capture failures observable while idle.
+                    if self._speech:
+                        self.wobbler.stop()
+                        self._speech = False
+                    self._activity.clear()
+                    try:
+                        await asyncio.wait_for(self._activity.wait(), 0.25)
+                    except TimeoutError:
+                        pass
+                    continue
                 now, latency = self.clock()
                 # At most one 20 ms chunk ahead of the SDK playback clock.
                 if self.backend._appsrc_pts > now + 20_000_000:
