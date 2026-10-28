@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "reachy_mini_ha_voice"
-version = "0.10.0"
+version = "0.11.0"
 description = "Home Assistant Assist voice satellite with Reachy Mini gestures"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,7 +34,7 @@ include = ["reachy_mini_ha_voice*"]
 namespaces = false
 
 [tool.setuptools.package-data]
-reachy_mini_ha_voice = ["vendor/**/*", "static/**/*"]
+reachy_mini_ha_voice = ["vendor/**/*", "static/**/*", "wakewords/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

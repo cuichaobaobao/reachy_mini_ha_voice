@@ -12,6 +12,9 @@ from websockets.exceptions import WebSocketException
 
 _LOG = logging.getLogger(__name__)
 VENDOR = Path(__file__).parent / "vendor" / "lva"
+# Application wake words, kept apart from the vendored upstream models in the
+# way upstream LVA documents custom wake words (an extra --wake-word-dir).
+WAKEWORDS = Path(__file__).parent / "wakewords"
 
 
 def command(data_dir, settings):
@@ -26,6 +29,8 @@ def command(data_dir, settings):
         str(data_dir / "preferences.json"),
         "--download-dir",
         str(data_dir / "downloads"),
+        "--wake-word-dir",
+        str(WAKEWORDS),
     ]
     for key in (
         "audio_input_device",

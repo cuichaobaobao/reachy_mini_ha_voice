@@ -5,7 +5,7 @@ from queue import Queue
 from unittest.mock import Mock
 
 from reachy_mini_ha_voice.motion import Motion
-from reachy_mini_ha_voice.runtime import VENDOR, command, events, stop_voice
+from reachy_mini_ha_voice.runtime import VENDOR, WAKEWORDS, command, events, stop_voice
 
 
 def test_conversation_and_interrupt():
@@ -53,6 +53,16 @@ def test_assets_and_command(tmp_path):
         tmp_path / "preferences.json"
     )
     assert args[args.index("--audio-input-device") + 1] == "ReSpeaker"
+    assert args[args.index("--wake-word-dir") + 1] == str(WAKEWORDS)
+
+
+def test_xiao_pai_is_a_bundled_micro_wake_word():
+    config = json.loads((WAKEWORDS / "xiao_pai.json").read_text(encoding="utf-8"))
+    assert config["type"] == "micro" and config["version"] == 2
+    assert config["wake_word"] == "小派小派"
+    assert (WAKEWORDS / config["model"]).stat().st_size > 1000
+    # Never shadow a vendored upstream model id.
+    assert not (VENDOR / "wakewords" / "xiao_pai.json").exists()
 
 
 def test_worker_cleanup():
