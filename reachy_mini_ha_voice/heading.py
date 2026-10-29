@@ -30,6 +30,7 @@ class Heading:
 
     def __init__(self):
         self.yaw = 0.0
+        self.rest = 0.0  # Manual body direction a finished conversation returns to.
         self.active = False
         self._trajectory = None
         self._return_at = None
@@ -40,6 +41,12 @@ class Heading:
     def _turn(self, target, now, duration):
         self._trajectory = (self.yaw, target, now, duration)
 
+    def follow(self, rest, yaw):
+        """Track the manual body direction while no conversation turn owns the heading."""
+        self.rest = rest
+        if not self.active and self._trajectory is None:
+            self.yaw = yaw
+
     def sample(self, now):
         if self._watchdog is not None and now >= self._watchdog:
             self._watchdog = None
@@ -47,7 +54,9 @@ class Heading:
             self._return_at = now  # Lost terminal event: do not stay turned forever.
         if self._return_at is not None and now >= self._return_at:
             self._return_at = None
-            self._turn(0.0, now, 1.5)
+            self._turn(self.rest, now, 1.5)
+        elif self._returning and self._trajectory[1] != self.rest:
+            self._turn(self.rest, now, 1.5)  # Manual direction changed during the return.
         if self._trajectory is not None:
             start, target, began, duration = self._trajectory
             t = min(1.0, max(0.0, (now - began) / duration))
@@ -55,9 +64,13 @@ class Heading:
             self.yaw = start + (target - start) * blend
             if t == 1:
                 self._trajectory = None
-                if target == 0 and self._ending and self._return_at is None:
+                if target == self.rest and self._ending and self._return_at is None:
                     self.active = False
         return self.yaw
+
+    @property
+    def _returning(self):
+        return self._ending and self._return_at is None and self._trajectory is not None
 
     def event(self, message, now):
         if not isinstance(message, dict):

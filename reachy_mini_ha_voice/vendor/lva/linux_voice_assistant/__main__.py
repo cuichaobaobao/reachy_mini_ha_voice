@@ -46,13 +46,13 @@ _SOUNDS_DIR = _REPO_DIR / "sounds"
 # -----------------------------------------------------------------------------
 
 
-async def main(argv=None, robot=None, install_signals=True) -> None:
+async def main(argv=None, robot=None, install_signals=True, controls=()) -> None:
     owner = []
     task = asyncio.current_task()
     if install_signals:
         asyncio.get_running_loop().add_signal_handler(signal.SIGTERM, task.cancel)
     try:
-        await run_voice(owner, argv, robot)
+        await run_voice(owner, argv, robot, controls)
     except asyncio.CancelledError:
         pass
     except Exception:
@@ -63,7 +63,7 @@ async def main(argv=None, robot=None, install_signals=True) -> None:
             await audio.close()
 
 
-async def run_voice(owner, argv=None, robot=None) -> None:
+async def run_voice(owner, argv=None, robot=None, controls=()) -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument(
         "--name",
@@ -459,6 +459,7 @@ async def run_voice(owner, argv=None, robot=None) -> None:
         version=version,
         esphome_version=esphome_version,
         entities=[],
+        robot_entities=list(controls),
         available_wake_words=available_wake_words,
         wake_words=wake_models,
         active_wake_words=active_wake_words,

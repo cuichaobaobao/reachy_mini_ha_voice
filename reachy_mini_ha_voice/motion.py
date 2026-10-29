@@ -39,14 +39,14 @@ def deadzone_safe_antennas(antennas):
     return tuple(safe)
 
 
-def relative_to_heading(head, heading):
-    """Remove only the application's acoustic yaw from a measured world pose."""
-    return create_head_pose(yaw=-heading) @ head
+def relative_to_heading(head, heading, head_yaw=0.0, pitch=0.0):
+    """Remove only the application's heading and manual head offsets from a world pose."""
+    return create_head_pose(pitch=-pitch) @ create_head_pose(yaw=-(heading + head_yaw)) @ head
 
 
-def with_heading(head, heading):
-    """Keep head and body facing together without replacing breathing/tilt."""
-    return create_head_pose(yaw=heading) @ head
+def with_heading(head, heading, head_yaw=0.0, pitch=0.0):
+    """Turn breathing/tilt with the body, plus any manual head yaw and pitch."""
+    return create_head_pose(yaw=heading + head_yaw) @ create_head_pose(pitch=pitch) @ head
 
 
 class Motion:

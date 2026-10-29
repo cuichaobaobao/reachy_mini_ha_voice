@@ -171,6 +171,10 @@ class ServerState:
     # Assigned in __main__ before the event loop starts.
     peripheral_api: "Optional[Any]" = None  # PeripheralAPIServer at runtime
 
+    # Reachy Mini app controls (manual direction), appended after LVA's own
+    # entities so existing entity keys stay unchanged.
+    robot_entities: "List[Any]" = field(default_factory=list)
+
     sensitivity_1_number_entity: "Optional[WakeWord1SensitivityNumberEntity]" = None
     sensitivity_2_number_entity: "Optional[WakeWord2SensitivityNumberEntity]" = None
     stop_sensitivity_number_entity: "Optional[StopWordSensitivityNumberEntity]" = None

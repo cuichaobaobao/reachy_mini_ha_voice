@@ -16,6 +16,7 @@ from urllib.request import urlopen
 # pylint: disable=no-name-in-module
 from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
     AuthenticationRequest,
+    ButtonCommandRequest,
     DeviceInfoRequest,
     DeviceInfoResponse,
     LightCommandRequest,
@@ -339,6 +340,7 @@ class VoiceSatelliteProtocol(APIServer):
         # Materialise ButtonLockEntity if a peripheral already registered
         # the button-lock switch before this satellite was constructed.
         self.register_pending_button_lock()
+        self.register_robot_entities()
 
         # ---- Instance variables ----
 
@@ -438,6 +440,14 @@ class VoiceSatelliteProtocol(APIServer):
         self.state.entities.append(entity)
         self.state.button_event_sensor_entity = entity
         _LOGGER.info("Button event sensor entity materialised")
+
+    def register_robot_entities(self) -> None:
+        """Attach the Reachy Mini app controls to this satellite (idempotent)."""
+        for entity in self.state.robot_entities:
+            if entity not in self.state.entities:
+                entity.key = len(self.state.entities)
+                self.state.entities.append(entity)
+            entity.server = self
 
     def register_pending_button_lock(self) -> None:
         """Materialise the button-lock switch once a peripheral has registered it.
@@ -735,7 +745,7 @@ class VoiceSatelliteProtocol(APIServer):
                 yield from entity.handle_message(SubscribeHomeAssistantStatesRequest())
         elif isinstance(
             msg,
-            (ListEntitiesRequest, SubscribeHomeAssistantStatesRequest, MediaPlayerCommandRequest, SwitchCommandRequest, NumberCommandRequest, SelectCommandRequest, LightCommandRequest),
+            (ListEntitiesRequest, SubscribeHomeAssistantStatesRequest, MediaPlayerCommandRequest, SwitchCommandRequest, NumberCommandRequest, SelectCommandRequest, LightCommandRequest, ButtonCommandRequest),
         ):
             for entity in self.state.entities:
                 yield from entity.handle_message(msg)

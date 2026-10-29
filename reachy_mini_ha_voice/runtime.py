@@ -47,17 +47,17 @@ def command(data_dir, settings):
 class VoiceWorker:
     """One cancellable LVA event loop sharing the application's SDK instance."""
 
-    def __init__(self, args, robot, runner=None):
+    def __init__(self, args, robot, runner=None, controls=()):
         self.returncode = None
         self._loop = None
         self._task = None
         self._stop = threading.Event()
         self._thread = threading.Thread(
-            target=self._run, args=(args, robot, runner), name="ha-voice-runtime", daemon=True
+            target=self._run, args=(args, robot, runner, controls), name="ha-voice-runtime", daemon=True
         )
         self._thread.start()
 
-    def _run(self, args, robot, runner):
+    def _run(self, args, robot, runner, controls):
         try:
             if runner is None:
                 if str(VENDOR) not in sys.path:
@@ -70,7 +70,7 @@ class VoiceWorker:
                 self._task = asyncio.current_task()
                 if self._stop.is_set():
                     return
-                await runner(argv=args, robot=robot, install_signals=False)
+                await runner(argv=args, robot=robot, install_signals=False, controls=controls)
 
             asyncio.run(run())
             self.returncode = 0
@@ -96,11 +96,11 @@ class VoiceWorker:
             raise RuntimeError("LVA worker did not finish cleanup within 10 seconds")
 
 
-def start_voice(data_dir, settings, robot):
+def start_voice(data_dir, settings, robot, controls=()):
     if sys.platform != "linux":
         raise RuntimeError("Voice runtime requires Linux on Reachy Mini Wireless.")
     data_dir.mkdir(parents=True, exist_ok=True)
-    return VoiceWorker(command(data_dir, settings), robot)
+    return VoiceWorker(command(data_dir, settings), robot, controls=controls)
 
 
 def stop_voice(worker):

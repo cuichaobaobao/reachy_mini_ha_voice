@@ -160,3 +160,48 @@ def test_failed_motor_send_keeps_voice_loop_and_last_successful_freeze(
     assert frames[5]['antennas'] == frames[3]['antennas']
     assert frames[6]['antennas'] == frames[3]['antennas']
     stop_voice.assert_called_once_with(worker)
+
+
+def test_manual_direction_is_composed_by_the_motion_loop(app_module, monkeypatch, tmp_path):
+    """Home Assistant controls steer the single motion owner; nothing else commands motors."""
+    import math
+
+    import numpy as np
+
+    monkeypatch.setenv("REACHY_HA_DATA_DIR", str(tmp_path))
+    child = Mock()
+    child.poll.return_value = None
+    controls = []
+    monkeypatch.setattr(app_module, "start_voice", lambda *args: controls.extend(args[3]) or child)
+    monkeypatch.setattr(app_module, "stop_voice", Mock())
+
+    async def reader(*_):
+        return
+
+    monkeypatch.setattr(app_module, "events", reader)
+    ticks = iter(t for now in [0, 2, 4] for t in (now, now))
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    stop = Mock()
+    stop.is_set.return_value = False
+    robot = Mock()
+    robot.get_current_joint_positions.return_value = (None, [-0.1745, 0.1745])
+    robot.get_current_head_pose.return_value = np.eye(4)
+    frames = []
+
+    def record(**command):
+        if not frames:
+            body, head, pitch, _center = controls
+            body.target.set("body", -30)  # Slider left.
+            head.target.set("head", 20)  # Slider right.
+            pitch.target.set("pitch", 10)  # Slider up.
+        frames.append(command)
+        if len(frames) == 3:
+            stop.is_set.return_value = True
+
+    robot.set_target.side_effect = record
+    app_module.ReachyMiniHaVoice().run(robot, stop)
+    assert [c.object_id for c in controls] == ["body_turn", "head_turn", "head_tilt", "center_pose"]
+    head = frames[2]["head"]
+    assert frames[2]["body_yaw"] == pytest.approx(math.radians(30))
+    assert math.degrees(math.atan2(head[1, 0], head[0, 0])) == pytest.approx(10)
+    assert math.degrees(-math.asin(head[2, 0])) == pytest.approx(-10)

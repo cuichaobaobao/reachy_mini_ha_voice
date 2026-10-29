@@ -10,7 +10,7 @@ def test_shared_robot_and_clean_cancellation():
     cleaned = threading.Event()
     robot = object()
 
-    async def runner(argv, robot, install_signals):
+    async def runner(argv, robot, install_signals, controls):
         assert argv == ['--name', 'test']
         assert robot is expected
         assert not install_signals

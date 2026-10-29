@@ -9,6 +9,8 @@ from virtual_audio import install
 
 install()
 from reachy_mini.media.media_manager import MediaBackend, MediaManager
+from reachy_mini_ha_voice.manual_pose import ManualTarget
+from reachy_mini_ha_voice.pose_controls import direction_controls
 from reachy_mini_ha_voice.runtime import VoiceWorker
 
 # Only physical camera/capture/speaker endpoints are substituted.
@@ -19,7 +21,7 @@ robot = SimpleNamespace(media=media, client=Mock(),
                                                        [0, 0, 1, 0], [0, 0, 0, 1]])
 stop = threading.Event()
 signal.signal(signal.SIGTERM, lambda *_: stop.set())
-worker = VoiceWorker(sys.argv[1:], robot)
+worker = VoiceWorker(sys.argv[1:], robot, controls=direction_controls(ManualTarget()))
 try:
     while not stop.wait(.05):
         if worker.poll() is not None:
