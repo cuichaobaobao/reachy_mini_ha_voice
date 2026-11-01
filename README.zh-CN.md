@@ -44,6 +44,8 @@
 
 有人唤醒时，机器人会转向说话的人，结束后回到你设的方向。应用重启后，手动方向回到正前方。
 
+- **Face Tracking** 开关：头跟着摄像头前的人脸转。对话期间和设了手动方向时会暂停，每次应用启动都是关的。人脸识别由机器人系统完成，只在跟踪时运行。
+
 ## 设置
 
 可选文件：机器人上的 `~/.local/share/reachy_mini_ha_voice/config.json`，改完后重启应用。
@@ -51,7 +53,6 @@
 ```json
 {
   "name": "Reachy Mini HA Voice",
-  "head_tracking": false,
   "wake_model": "okay_nabu",
   "network_interface": "wlan0"
 }
@@ -60,7 +61,6 @@
 | 键 | 含义 |
 |---|---|
 | `name` | 在 Home Assistant 里显示的设备名 |
-| `head_tracking` | 用摄像头跟随人脸（默认关闭） |
 | `wake_model` | 默认唤醒词 |
 | `network_interface` | 用哪个网卡对外发布 |
 

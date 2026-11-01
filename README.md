@@ -71,6 +71,11 @@ When someone wakes the robot, it turns to them and then goes back to the
 manual direction. The manual direction resets to straight ahead when the app
 restarts.
 
+- **Face Tracking** switch: the head follows the face in front of the camera.
+  It pauses during a conversation and while a manual direction is set, and is
+  off every time the app starts. Face detection runs in the robot's daemon,
+  only while tracking is active.
+
 ## Settings
 
 Optional file: `~/.local/share/reachy_mini_ha_voice/config.json` on the robot.
@@ -79,7 +84,6 @@ Restart the app after editing it.
 ```json
 {
   "name": "Reachy Mini HA Voice",
-  "head_tracking": false,
   "wake_model": "okay_nabu",
   "network_interface": "wlan0"
 }
@@ -88,7 +92,6 @@ Restart the app after editing it.
 | Key | Meaning |
 |---|---|
 | `name` | Device name shown in Home Assistant |
-| `head_tracking` | Follow faces with the camera (off by default) |
 | `wake_model` | Default wake word |
 | `network_interface` | Network interface to announce on |
 

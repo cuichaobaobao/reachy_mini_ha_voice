@@ -1,4 +1,4 @@
-"""Home Assistant controls for the manual direction, served by the LVA device."""
+"""Home Assistant controls for the robot (direction, face tracking), served by the LVA device."""
 
 # pylint: disable=no-name-in-module
 from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
@@ -6,9 +6,12 @@ from aioesphomeapi.api_pb2 import (  # type: ignore[attr-defined]
     ListEntitiesButtonResponse,
     ListEntitiesNumberResponse,
     ListEntitiesRequest,
+    ListEntitiesSwitchResponse,
     NumberCommandRequest,
     NumberStateResponse,
     SubscribeHomeAssistantStatesRequest,
+    SwitchCommandRequest,
+    SwitchStateResponse,
 )
 from aioesphomeapi.model import NumberMode
 
@@ -82,6 +85,37 @@ class CenterButton:
             )
 
 
-def direction_controls(target):
+class FaceTrackingSwitch:
+    """Let the daemon follow faces; off at every start, paused by the motion loop."""
+
+    def __init__(self, enabled):
+        self.server = None
+        self.key = 0
+        self.enabled = enabled
+        self.name = "Face Tracking"
+        self.object_id = "face_tracking"
+
+    def state(self):
+        return SwitchStateResponse(key=self.key, state=self.enabled.is_set())
+
+    def handle_message(self, msg):
+        if isinstance(msg, SwitchCommandRequest) and msg.key == self.key:
+            if msg.state:
+                self.enabled.set()
+            else:
+                self.enabled.clear()
+            yield self.state()
+        elif isinstance(msg, ListEntitiesRequest):
+            yield ListEntitiesSwitchResponse(
+                object_id=self.object_id,
+                key=self.key,
+                name=self.name,
+                icon="mdi:face-recognition",
+            )
+        elif isinstance(msg, SubscribeHomeAssistantStatesRequest):
+            yield self.state()
+
+
+def robot_controls(target, face_tracking):
     sliders = [DirectionNumber(target, *spec) for spec in SLIDERS]
-    return [*sliders, CenterButton(target, sliders)]
+    return [*sliders, CenterButton(target, sliders), FaceTrackingSwitch(face_tracking)]

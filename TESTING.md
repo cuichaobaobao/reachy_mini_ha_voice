@@ -11,7 +11,8 @@ published only when both pass.
 
 - **Unit and regression tests** (`pytest`): conversation state transitions and
   interruption, wake direction sampling and correction, wake turn timing,
-  hold and return, manual direction limits and hand-off, listening antenna
+  hold and return, manual direction limits and hand-off, the face tracking
+  switch and its pauses, listening antenna
   freeze, failed motor sends, the app lifecycle and shutdown order, wake word
   discovery (including `xiao_pai`) and real loopback WebSocket events.
 - **Official motion comparison**: `BreathingMove` and the motion manager
@@ -21,8 +22,8 @@ published only when both pass.
   `reachy-mini-app-assistant check`.
 - **Smoke tests on real software** (`scripts/`): the real SDK GStreamer audio
   pipeline with virtual endpoints and no PulseAudio or libmpv; a real LVA
-  runtime with an ESPHome client (handshake, entity list, manual direction
-  controls, announcements fetched over HTTP, a 3-minute connected run, clean
+  runtime with an ESPHome client (handshake, entity list, direction and face
+  tracking controls, announcements fetched over HTTP, a 3-minute connected run, clean
   shutdown); TTS playback driving the official `HeadWobbler`; the wake chime
   path; the vendored wake handler capturing direction before the chime; and
   SDK motion reconnects.
@@ -51,7 +52,8 @@ After installing a release from the app store:
   false wakes.
 - The robot turns toward the speaker, holds, and returns; breathing, the
   listening antenna freeze and speech head wobble look right.
-- Manual direction sliders and Center move the robot as expected.
+- Manual direction sliders and Center move the robot as expected; Face
+  Tracking follows a face and pauses during a conversation.
 - Stopping and restarting the app is clean.
 
 Logs: `sudo journalctl -u reachy-mini-daemon` on the robot (look for

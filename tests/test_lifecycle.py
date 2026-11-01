@@ -190,7 +190,7 @@ def test_manual_direction_is_composed_by_the_motion_loop(app_module, monkeypatch
 
     def record(**command):
         if not frames:
-            body, head, pitch, _center = controls
+            body, head, pitch, _center, _tracking = controls
             body.target.set("body", -30)  # Slider left.
             head.target.set("head", 20)  # Slider right.
             pitch.target.set("pitch", 10)  # Slider up.
@@ -200,8 +200,64 @@ def test_manual_direction_is_composed_by_the_motion_loop(app_module, monkeypatch
 
     robot.set_target.side_effect = record
     app_module.ReachyMiniHaVoice().run(robot, stop)
-    assert [c.object_id for c in controls] == ["body_turn", "head_turn", "head_tilt", "center_pose"]
+    assert [c.object_id for c in controls] == [
+        "body_turn", "head_turn", "head_tilt", "center_pose", "face_tracking"]
     head = frames[2]["head"]
     assert frames[2]["body_yaw"] == pytest.approx(math.radians(30))
     assert math.degrees(math.atan2(head[1, 0], head[0, 0])) == pytest.approx(10)
     assert math.degrees(-math.asin(head[2, 0])) == pytest.approx(-10)
+
+
+def test_face_tracking_switch_yields_to_conversation_and_manual_direction(app_module, monkeypatch, tmp_path):
+    """The switch starts daemon tracking; wake turns and a manual direction pause it."""
+    import numpy as np
+
+    monkeypatch.setenv("REACHY_HA_DATA_DIR", str(tmp_path))
+    (tmp_path / "config.json").write_text('{"head_tracking": true}')  # Retired option: ignored.
+    child = Mock()
+    child.poll.return_value = None
+    controls = []
+    monkeypatch.setattr(app_module, "start_voice", lambda *args: controls.extend(args[3]) or child)
+    monkeypatch.setattr(app_module, "stop_voice", Mock())
+    queue = app_module.Queue()
+    monkeypatch.setattr(app_module, "Queue", lambda: queue)
+
+    async def reader(*_):
+        return
+
+    monkeypatch.setattr(app_module, "events", reader)
+    times = [0, 0.1, 0.2, 1, 2, 9, 11, 12, 13, 14, 16]
+    ticks = iter(t for now in times for t in (now, now))
+    monkeypatch.setattr(app_module, "time", SimpleNamespace(monotonic=lambda: next(ticks)))
+    stop = Mock()
+    stop.is_set.return_value = False
+    robot = Mock()
+    robot.get_current_joint_positions.return_value = (None, [-0.1745, 0.1745])
+    robot.get_current_head_pose.return_value = np.eye(4)
+    frames = []
+    actions = {
+        1: lambda: controls[4].enabled.set(),  # Home Assistant turns the switch on.
+        2: lambda: queue.put({"event": "wake_word_detected"}),
+        4: lambda: queue.put({"event": "tts_finished"}),  # Hold 5 s, return 1.5 s.
+        8: lambda: controls[0].target.set("body", 30),  # Manual direction pauses tracking.
+        9: lambda: controls[0].target.center(),
+    }
+
+    def record(**command):
+        frames.append(command)
+        actions.get(len(frames), lambda: None)()
+        if len(frames) == len(times):
+            stop.is_set.return_value = True
+
+    robot.set_target.side_effect = record
+    app_module.ReachyMiniHaVoice().run(robot, stop)
+    calls = [c[0] for c in robot.method_calls if c[0] in ("start_head_tracking", "stop_head_tracking")]
+    assert calls == [
+        "stop_head_tracking",  # Startup: off regardless of the retired config option.
+        "start_head_tracking",  # Switch on.
+        "stop_head_tracking",  # Wake turn and conversation.
+        "start_head_tracking",  # Returned after the hold.
+        "stop_head_tracking",  # Manual body direction.
+        "start_head_tracking",  # Centered again.
+        "stop_head_tracking",  # Shutdown.
+    ]

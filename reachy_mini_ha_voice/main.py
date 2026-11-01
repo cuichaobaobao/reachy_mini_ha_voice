@@ -23,7 +23,7 @@ from .motion import (
     with_heading,
 )
 from .motion_link import MotionLink
-from .pose_controls import direction_controls
+from .pose_controls import robot_controls
 from .runtime import events, start_voice, stop_voice
 from .startup import wake_up_if_sleeping
 
@@ -45,7 +45,8 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             raise TypeError("config.json must contain a JSON object")
         logging.getLogger("reachy_mini_ha_voice").setLevel(logging.INFO)
         target = ManualTarget()
-        process = start_voice(data_dir, settings, reachy_mini, direction_controls(target))
+        face_tracking = threading.Event()  # Home Assistant switch; off at every start.
+        process = start_voice(data_dir, settings, reachy_mini, robot_controls(target, face_tracking))
         reader_stop = threading.Event()
         queue = Queue()
         reader = threading.Thread(
@@ -77,11 +78,8 @@ class ReachyMiniHaVoice(ReachyMiniApp):
             def run_motion():
                 nonlocal facing, offsets
                 try:
-                    if settings.get("head_tracking", False) is True:
-                        reachy_mini.start_head_tracking(weight=1.0)
-                    else:
-                        reachy_mini.stop_head_tracking()
-                    tracking = settings.get("head_tracking", False) is True
+                    reachy_mini.stop_head_tracking()
+                    tracking = False
                     while not stop_event.is_set() and not motion_stop.is_set():
                         if process.poll() is not None:
                             raise RuntimeError(
@@ -109,11 +107,7 @@ class ReachyMiniHaVoice(ReachyMiniApp):
                         heading.follow(manual.rest, body)
                         facing = heading.sample(now)
                         heading.report_measured(reachy_mini, now)
-                        want_tracking = (
-                            settings.get("head_tracking", False) is True
-                            and not heading.active
-                            and manual.centered
-                        )
+                        want_tracking = face_tracking.is_set() and not heading.active and manual.centered
                         if tracking != want_tracking:
                             if want_tracking:
                                 reachy_mini.start_head_tracking(weight=1.0)

@@ -1,4 +1,6 @@
-"""Manual direction: goal limits, easing, SDK signs and wake-turn hand-off."""
+"""Manual direction and face tracking controls: limits, easing, SDK signs, hand-off."""
+
+import threading
 
 import pytest
 from aioesphomeapi.api_pb2 import (
@@ -6,14 +8,17 @@ from aioesphomeapi.api_pb2 import (
     ListEntitiesButtonResponse,
     ListEntitiesNumberResponse,
     ListEntitiesRequest,
+    ListEntitiesSwitchResponse,
     NumberCommandRequest,
     NumberStateResponse,
     SubscribeHomeAssistantStatesRequest,
+    SwitchCommandRequest,
+    SwitchStateResponse,
 )
 
 from reachy_mini_ha_voice.heading import Heading
 from reachy_mini_ha_voice.manual_pose import ManualPose, ManualTarget
-from reachy_mini_ha_voice.pose_controls import direction_controls
+from reachy_mini_ha_voice.pose_controls import robot_controls
 
 
 def test_goal_uses_official_limits_and_ignores_non_finite_values():
@@ -85,12 +90,13 @@ def test_heading_return_replans_when_manual_body_changes():
 
 def test_home_assistant_controls_report_and_set_the_goal():
     target = ManualTarget()
-    controls = direction_controls(target)
+    controls = robot_controls(target, threading.Event())
     for key, entity in enumerate(controls):
         entity.key = key
-    body, head, pitch, center = controls
+    body, head, pitch, center, _tracking = controls
     listed = [msg for entity in controls for msg in entity.handle_message(ListEntitiesRequest())]
-    assert [type(msg) for msg in listed] == [ListEntitiesNumberResponse] * 3 + [ListEntitiesButtonResponse]
+    assert [type(msg) for msg in listed] == [ListEntitiesNumberResponse] * 3 + [
+        ListEntitiesButtonResponse, ListEntitiesSwitchResponse]
     assert [(msg.object_id, msg.min_value, msg.max_value) for msg in listed[:3]] == [
         ("body_turn", -160, 160), ("head_turn", -65, 65), ("head_tilt", -40, 40)]
     (state,) = head.handle_message(NumberCommandRequest(key=1, state=99))
@@ -102,3 +108,20 @@ def test_home_assistant_controls_report_and_set_the_goal():
     states = list(center.handle_message(ButtonCommandRequest(key=3)))
     assert states == [NumberStateResponse(key=k, state=0) for k in range(3)]
     assert target.snapshot() == {"body": 0.0, "head": 0.0, "pitch": 0.0}
+
+
+def test_face_tracking_switch_starts_off_and_follows_home_assistant():
+    enabled = threading.Event()
+    *_, switch = robot_controls(ManualTarget(), enabled)
+    switch.key = 4
+    (listed,) = switch.handle_message(ListEntitiesRequest())
+    assert (listed.object_id, listed.name) == ("face_tracking", "Face Tracking")
+    assert list(switch.handle_message(SubscribeHomeAssistantStatesRequest())) == [
+        SwitchStateResponse(key=4, state=False)]
+    assert list(switch.handle_message(SwitchCommandRequest(key=4, state=True))) == [
+        SwitchStateResponse(key=4, state=True)]
+    assert enabled.is_set()
+    assert list(switch.handle_message(SwitchCommandRequest(key=3, state=False))) == []
+    assert enabled.is_set()
+    switch.handle_message(SwitchCommandRequest(key=4, state=False)).__next__()
+    assert not enabled.is_set()

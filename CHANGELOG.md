@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/): new behaviour raises the minor
 version, fixes raise the patch version.
 
+## [0.13.0] - 2026-11-01
+
+### Added
+- Face Tracking switch on the Home Assistant device page. It turns on the
+  robot daemon's face tracking, is off at every start and is not saved. As
+  before, tracking pauses during a wake turn and conversation (until the
+  return finishes) and while a manual direction is set.
+
+### Removed
+- The `head_tracking` option in `config.json`; the switch replaces it and the
+  option is ignored if present.
+
+Wake, conversation, motion and audio are unchanged while the switch is off.
+
 ## [0.12.3] - 2026-11-01
 
 No change to the app itself.
@@ -265,6 +279,7 @@ Turn, breathing, antenna and speech wobble behaviour is unchanged.
 - First installable version: official `ReachyMiniApp` entry point, bundled
   Linux Voice Assistant runtime, ESPHome discovery and local wake word.
 
+[0.13.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.3...v0.13.0
 [0.12.3]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.2...v0.12.3
 [0.12.2]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.0...v0.12.1

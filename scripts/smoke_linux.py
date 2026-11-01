@@ -59,17 +59,19 @@ async def first_announcement(client):
     print("First ESPHome announcement -> HTTP test audio fetched and completed without retry")
 
 
-async def direction_controls(client, entities):
-    """Manual direction entities are listed after LVA's own and round-trip over ESPHome."""
-    from aioesphomeapi import ButtonInfo, NumberInfo
+async def robot_controls(client, entities):
+    """Robot controls are listed after LVA's own entities and round-trip over ESPHome."""
+    from aioesphomeapi import ButtonInfo, NumberInfo, SwitchInfo
 
     by_id = {entity.object_id: entity for entity in entities}
     sliders = [by_id[name] for name in ("body_turn", "head_turn", "head_tilt")]
     center = by_id["center_pose"]
     assert all(isinstance(slider, NumberInfo) for slider in sliders), sliders
     assert isinstance(center, ButtonInfo), center
+    tracking = by_id["face_tracking"]
+    assert isinstance(tracking, SwitchInfo), tracking
     assert [s.max_value for s in sliders] == [160, 65, 40]
-    ours = {"body_turn", "head_turn", "head_tilt", "center_pose"}
+    ours = {"body_turn", "head_turn", "head_tilt", "center_pose", "face_tracking"}
     lva_keys = [entity.key for entity in entities if entity.object_id not in ours]
     assert min(by_id[name].key for name in ours) > max(lva_keys), "LVA entity keys must stay first"
     states = {}
@@ -89,13 +91,17 @@ async def direction_controls(client, entities):
             await asyncio.wait_for(changed.wait(), 5)
         raise AssertionError(states)
 
-    await until({s.key: 0 for s in sliders})
+    await until({**{s.key: 0 for s in sliders}, tracking.key: False})
+    client.switch_command(tracking.key, True)
+    await until({tracking.key: True})
+    client.switch_command(tracking.key, False)
+    await until({tracking.key: False})
     client.number_command(sliders[0].key, 300)
     client.number_command(sliders[2].key, -12)
     await until({sliders[0].key: 160, sliders[2].key: -12})
     client.button_command(center.key)
     await until({s.key: 0 for s in sliders})
-    print("Manual direction controls: listed after LVA entities, clamped, centered")
+    print("Robot controls: listed after LVA entities, sliders clamped and centered, tracking switch toggled")
 
 
 async def main():
@@ -158,7 +164,7 @@ async def main():
             print(
                 f"ESPHome handshake successful: {info.name}, {len(entities)} entities"
             )
-            await direction_controls(client, entities)
+            await robot_controls(client, entities)
             await first_announcement(client)
             # Three-minute connected run, repeated real playback and fresh API
             # requests. No disconnect before stop: exercise production cleanup.
