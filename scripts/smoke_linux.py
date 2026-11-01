@@ -170,7 +170,7 @@ async def main():
             print("180-second connected LVA/audio soak passed; 7 announcements completed")
             import json
 
-            from websockets.client import connect
+            from websockets.asyncio.client import connect
 
             async with connect("ws://127.0.0.1:6055") as socket:
                 snapshot = json.loads(await asyncio.wait_for(socket.recv(), 5))

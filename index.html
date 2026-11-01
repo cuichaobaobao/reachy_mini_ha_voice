@@ -1,1 +1,87 @@
-<!doctype html><html lang="zh-CN"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Reachy Mini HA Voice</title><link rel="stylesheet" href="style.css"><main><p class="label">REACHY MINI × HOME ASSISTANT</p><h1>你的家，<br>听得见，也看得见回应。</h1><p>说一声 Okay Nabu。让 Reachy Mini 接入 Home Assistant，在思考时侧耳，在回答时点头。</p><section><h2>从语音到动作</h2><p>本地唤醒 → 安静聆听 → HA Assist 思考 → 语音回答与平滑动作</p></section><section><h2>在机器人上安装</h2><p>这是 Wireless Linux Python 应用。使用 Reachy Mini Dashboard 安装本 Space，然后在 Home Assistant 中添加自动发现的 ESPHome 设备。</p><p>系统需具备 PulseAudio/PipeWire 与 libmpv。安装步骤、配置和测试范围请阅读说明。</p></section><nav><a href="https://huggingface.co/spaces/lichao622/reachy_mini_ha_voice/blob/main/README.md">安装说明</a><a href="https://github.com/cuichaobaobao/reachy_mini_ha_voice">GitHub 源码</a><a href="https://huggingface.co/spaces/pollen-robotics/Reachy_Mini">Reachy Mini 应用</a></nav><footer>基于 OHF Linux Voice Assistant · 动作设计参考 Pollen Robotics · Apache-2.0 社区应用</footer></main></html>
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Reachy Mini HA Voice</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<main>
+  <button id="lang" type="button" aria-label="切换到中文">中文</button>
+
+  <article lang="en">
+    <h1>Reachy Mini HA Voice</h1>
+    <p class="lead">A Home Assistant voice assistant for Reachy Mini Wireless.</p>
+    <p>Say “Okay Nabu” and talk to Home Assistant through your robot. It turns toward you when you call it, keeps its antennas still while it listens, and moves its head along when it answers.</p>
+
+    <h2>What it does</h2>
+    <ul>
+      <li>The wake word runs on the robot. What you say goes to your Home Assistant Assist pipeline.</li>
+      <li>Shows up in Home Assistant as an ESPHome device, found automatically.</li>
+      <li>Turns toward whoever said the wake word.</li>
+      <li>Breathing, listening and talking motions follow the official conversation app.</li>
+      <li>Sliders in Home Assistant to point the head and body.</li>
+      <li>Also understands the Chinese wake word “小派小派”.</li>
+    </ul>
+
+    <h2>Install</h2>
+    <p>Install it from the app store in Reachy Mini Control and start it. Then add the ESPHome device that Home Assistant finds. You need an Assist pipeline with speech-to-text and text-to-speech. No API keys.</p>
+
+    <p class="links">
+      <a href="https://huggingface.co/spaces/lichao622/reachy_mini_ha_voice/blob/main/README.md">Read me</a>
+      <a href="https://github.com/cuichaobaobao/reachy_mini_ha_voice">Source on GitHub</a>
+    </p>
+    <p class="note">A community app, not made by Pollen Robotics. Built on OHF’s Linux Voice Assistant. Apache-2.0.</p>
+  </article>
+
+  <article lang="zh-CN" hidden>
+    <h1>Reachy Mini HA Voice</h1>
+    <p class="lead">给 Reachy Mini Wireless 用的 Home Assistant 语音助手。</p>
+    <p>喊一声“Okay Nabu”，就能通过机器人和 Home Assistant 对话。你叫它，它会转过来看你；听你说话时天线不乱动；回答时头会跟着轻轻摆动。</p>
+
+    <h2>能做什么</h2>
+    <ul>
+      <li>唤醒词在机器人本地识别，你说的话交给 Home Assistant 的 Assist 处理。</li>
+      <li>在 Home Assistant 里是一个 ESPHome 设备，会被自动发现。</li>
+      <li>谁喊的唤醒词，就转向谁。</li>
+      <li>呼吸、聆听、说话时的动作参照官方对话应用。</li>
+      <li>在 Home Assistant 里用滑块调头和身体的朝向。</li>
+      <li>支持中文唤醒词“小派小派”。</li>
+    </ul>
+
+    <h2>安装</h2>
+    <p>在 Reachy Mini Control 的应用商店里安装并启动，然后在 Home Assistant 里添加它发现的 ESPHome 设备。需要一个配置好语音识别和语音合成的 Assist 流程，不需要任何 API 密钥。</p>
+
+    <p class="links">
+      <a href="https://huggingface.co/spaces/lichao622/reachy_mini_ha_voice/blob/main/README.zh-CN.md">使用说明</a>
+      <a href="https://github.com/cuichaobaobao/reachy_mini_ha_voice">GitHub 源码</a>
+    </p>
+    <p class="note">社区应用，不是 Pollen Robotics 官方出品。基于 OHF 的 Linux Voice Assistant，Apache-2.0 许可。</p>
+  </article>
+</main>
+<script>
+(function () {
+  var button = document.getElementById("lang");
+  var en = document.querySelector('article[lang="en"]');
+  var zh = document.querySelector('article[lang="zh-CN"]');
+  function show(lang) {
+    var chinese = lang === "zh";
+    en.hidden = chinese;
+    zh.hidden = !chinese;
+    document.documentElement.lang = chinese ? "zh-CN" : "en";
+    button.textContent = chinese ? "English" : "中文";
+    button.setAttribute("aria-label", chinese ? "Switch to English" : "切换到中文");
+    try { localStorage.setItem("lang", lang); } catch (e) {}
+  }
+  var saved = null;
+  try { saved = localStorage.getItem("lang"); } catch (e) {}
+  if (new URLSearchParams(location.search).get("lang") === "zh") saved = "zh";
+  show(saved === "zh" ? "zh" : "en");
+  button.addEventListener("click", function () {
+    show(en.hidden ? "en" : "zh");
+  });
+})();
+</script>
+</body>
+</html>

@@ -72,7 +72,7 @@ def test_worker_cleanup():
 
 
 def test_real_websocket_events_and_shutdown():
-    from websockets.server import serve
+    from websockets.asyncio.server import serve
 
     async def exercise():
         stop = threading.Event()

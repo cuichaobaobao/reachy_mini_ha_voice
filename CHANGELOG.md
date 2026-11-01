@@ -1,122 +1,276 @@
 # Changelog
 
-## 0.12.0
-- 新增手动方向：HA 设备页增加 Body Turn（头身一起转，±160°）、Head Turn（只转头，±65°）、Head Tilt（抬头低头，±40°）三个滑块和 Center 按钮，范围按官方限制。
-- 手动方向由应用唯一的动作循环叠加执行，不另开控制者：呼吸、天线、聆听冻结、TTS 摆头照常；唤醒时身体从手动朝向转向说话人，头的手动偏转临时放正，结束后回到手动设定的方向。手动方向不为 0 时视觉追踪不转头；重启后回到正前方。
-- 内置 LVA 的改动：`ServerState` 新增 `robot_entities`，卫星在自身实体之后追加这些实体（原有实体编号不变），并处理 ESPHome 按钮指令；`main()` 新增 `controls` 参数。
-- 全部滑块为 0 时，唤醒转向、动作、音频和 HA 协议与 0.11.0 相同。
+All notable changes to this project are documented here. The format follows
+[Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project uses
+[Semantic Versioning](https://semver.org/): new behaviour raises the minor
+version, fixes raise the patch version.
 
-## 0.11.0
-- 新增中文唤醒词「小派小派」（`xiao_pai`）：自训练的 microWakeWord v2 模型，作者 lichao。可在 HA 设备页的唤醒词选项中选择，与上游内置唤醒词并列，也可同时启用两个。
-- 模型放在应用自己的 `reachy_mini_ha_voice/wakewords/`，由应用在启动 LVA 时通过 `--wake-word-dir` 追加，与上游文档中“自定义唤醒词放在单独目录并用 `WAKE_WORD_DIR` 加入”的做法一致；`vendor/lva` 仍与上游保持一致，内置唤醒词不变。
-- 不改变默认唤醒词、唤醒转向、动作、音频和 HA 协议。
+## [0.12.1] - 2026-11-01
 
-## 0.10.0
-- 内置的 Linux Voice Assistant 同步到上游 `20f8a1f`（原 `39a10e7`，共 37 个提交），带来上游修复：播报结束后已暂停的音乐保持暂停、`preferences.json` 含未知字段时不再无法启动、连续对话沿用本次唤醒词对应的 HA 流程、停用的唤醒模型会被卸载、日志带毫秒时间戳等。
-- 新增上游默认开启的“流程结束提示音”：唤醒后流程未给出语音回复就结束（如没说话、未识别到内容）时播放一声低提示音。
-- 保留本应用的全部适配：SDK 麦克风/喇叭、TTS 摆头、唤醒方向快照、有序退出等。上游新增的麦克风重连（#491）针对 soundcard 录音并会强制结束进程，本应用由 SDK 管理录音，未采用。
-- 降低空闲 CPU：共享播放混音循环在没有声音播放时不再每 5 ms 空转，改为等待播放开始或恢复时立即唤醒；播放节奏、TTS 摆头不变。
-- 不改变唤醒转向、动作、断线重连和 HA 协议。
+No change to wake, conversation, motion or the Home Assistant protocol.
 
-## 0.9.0
-- 唤醒转向加入 DOA 角度校正：真机实测麦克风阵列会把侧向声源报小（45° 约读成 20°，90° 约读成 54°）。原始相对角按分段线性曲线 0→0°、20→45°、54→90° 映射，左右对称，封顶 ±90°；3° 死区仍按校正前的原始读数判断，正前方噪声不会被放大。
-- 唤醒方向只取语音样本：窗口内没有 `speech_detected=True` 的读数时不再用非语音样本凑数，直接跳过转向（这类读数多指向环境噪声）。
-- DOA 中位数改为线性计算：0（左）与 π（右）方向相反，不再按首尾相接的环处理。
-- `Wake turn` 日志同时记录原始与校正后的相对角。
-- 不改变转向时长公式、头身协同、±160° 身体边界、5 秒保持/1.5 秒回正，以及聆听/思考/说话动作、音频和 HA 协议。
+### Fixed
+- Allow Reachy Mini SDK 1.13 and newer (`reachy-mini>=1.12.0`). The previous
+  `<1.13` cap would downgrade the SDK in the robot's shared app environment
+  after a system update. CI now tests both SDK 1.12.0 and the latest release.
+- Allow websockets 13–15 instead of exactly 12, matching the SDK's range.
+  The exact pin downgraded websockets in the shared app environment, which
+  breaks apps that need a newer version (such as the official conversation
+  app's realtime voice).
+- Removing a file from the repository now also removes it from the Hugging
+  Face Space.
 
-## 0.8.0
-- 唤醒提示音改为 SDK 本地文件播放：专用播放线程调用 SDK `media.play_sound()`，不再经过应用的 PCM 分块混音循环。仅匹配配置的唤醒提示音；原文件、唤醒模型、TTS/音乐播放管线不变。
-- 完成判断使用文件帧数/采样率计算时长，通过可取消的 `Event.wait(duration)` 等待后回到 LVA 事件循环触发完成回调；这是时长估算，不是声卡实际播完确认。取消、替换、退出不触发过期的聆听回调；保留音量/duck 设置。
-- 将原有 60 Hz 动作循环移到 `ha-motion` 专用线程，消费事件队列，处理转向及聆听、思考、说话、空闲状态的基础姿态和天线目标。启动/退出动作在工作线程之外串行执行；退出先停止并回收线程，再清理连接。
-- LVA 原本就运行在同一应用进程的 `ha-voice-runtime` 线程中，本次未改变进程组织。语音事件仍经本地 peripheral WebSocket 接收线程送入动作队列，并非直接从语音线程投递动作队列。
-- 转向采样、角度、时长、保持/回中，以及天线冻结/避让、呼吸波形、TTS HeadWobbler 算法与幅度不变。TTS 语音摆头偏移仍由音频侧计算并发送，不属于 `ha-motion` 的基础姿态循环；唤醒提示音不参与该语音摆头计算。
-- 本次针对提示音短促现象调整播放路径；自动化测试不能代替真机长时间听感确认。
+### Changed
+- The application's own WebSocket code uses the `websockets.asyncio` API
+  (available since websockets 13). The vendored LVA is unchanged.
+- CI runs on Ubuntu 24.04 with Node 24 actions (`checkout@v6`,
+  `setup-python@v6`, `setup-uv@v7`).
+- README is now in English with a Chinese version (`README.zh-CN.md`). The
+  Space landing page is rewritten with an English/Chinese switch and no
+  longer lists PulseAudio and libmpv requirements removed in 0.4.0.
+- `TESTING.md` describes the current validation; the changelog is in English.
 
-## 0.7.2
-- 启动唤醒判断与官方对话应用对齐：用 `SLEEP_HEAD_POSE` 和 `distance_between_poses` 判断睡姿（平移 ≤ 0.05 m、旋转 ≤ 0.35 rad）；读不到姿态时不唤醒；确认在睡姿后先 `enable_motors()` 再 `wake_up()`。
-- 修复机器人在睡眠时从桌面应用启动却只响不动的问题：此前缺少 `enable_motors()`，电机未通电，唤醒动作不生效；停止后 daemon 仍判定为睡姿而保持 limp。
-- 不改变唤醒词、音频、转向或 HA 协议。
+### Removed
+- `plan.md`, outdated early development notes.
 
-## 0.7.1
-- 应用启动时先读取头部关节，只有实测头部姿态与 SDK 睡眠姿态（`SLEEP_HEAD_POSE`）一致时才调用 `wake_up()`；daemon 或天线唤醒已经让机器人醒来时，不再重复播放唤醒动画和 `wake_up.wav`。
-- 姿态遥测不可用时保持旧行为（唤醒一次），避免手动从睡眠启动时机器人保持未使能状态。
-- 不改变唤醒词、音频、转向或 HA 协议。
+## [0.12.0] - 2026-10-29
 
-## 0.7.0
-- 唤醒方向取样窗口由 0.4 秒放宽到 0.8 秒，覆盖整个唤醒词，样本数从 1–4 个提高到 6–10 个。
-- 语音标记样本 ≥3 个时只用它们；不足 3 个时以语音样本为种子，收拢 ±30° 内的邻近样本后再取中位数，避免只靠单个点决策。日志 `source` 区分 `speech` / `mixed` / `recent`。
-- 唤醒转向死区由 6° 降到 3°，小角度也会转；不再因为样本少而跳过转向。
-- 不改变转向公式、±160° 边界、5 秒保持/1.5 秒回正、动作波形、音频或 HA 协议。角度压缩与前后不可分仍未解决。
+### Added
+- Manual direction on the Home Assistant device page: Body Turn (head and body
+  together, ±160°), Head Turn (head only, ±65°), Head Tilt (±40°) and a Center
+  button. The ranges are the official limits.
 
-本项目的版本记录。版本号规则：行为变化升 minor，修复升 patch；发布顺序为先 GitHub、CI 通过后再同步 Hugging Face。
+### Changed
+- The single motion loop composes the manual direction under breathing,
+  antennas, listening freeze and speech wobble. A wake turn starts from the
+  manual body direction, temporarily straightens the head and returns to the
+  manual direction afterwards. Head tracking does not move the head while a
+  manual direction is set. The manual direction is not saved across restarts.
+- Vendored LVA: `ServerState.robot_entities` holds app controls that the
+  satellite appends after its own entities (existing entity keys unchanged),
+  ESPHome button commands are routed to them, and `main()` accepts `controls`.
 
-## 0.6.5
-- 唤醒方向不再只取识别瞬间的最后一个 DOA 采样，改为最近 0.4 秒内 `speech_detected=True` 读数的圆周中位数；完全没有语音样本时才回退到最近样本，日志注明来源。
-- `Wake direction snapshot` 增加 `source(样本数, 离散度)`，`Wake turn` 记录来源，用于区分语音中位数与瞬时回退。
-- 不改变转向公式、6° 死区、±160° 边界、5 秒保持/1.5 秒回正，也不改动作波形、音频或 HA 协议。
+With all sliders at 0, behaviour is the same as 0.11.0.
 
-## 0.6.4
-- 退出聆听（包括避让尚未完成时）的 0.4 秒混回，改为从最后一次 `set_target` 成功下发的天线值开始，而不是“已算出但未送达”的值；发送失败时不再产生一次额外跳变。
-- 不改变避让阈值、目标角度、0.2 秒过渡、呼吸波形、转向、语音摆动或 HA/音频逻辑。
+## [0.11.0] - 2026-10-28
 
-## 0.6.3
-- 聆听冻结时若某一侧天线 |角度| < 8°，用 0.2 秒平滑移到同方向 ±10° 后锁死；其余情况保持官方冻结行为。天线在 0° 附近是齿轮箱不稳定平衡点，静止保持会抖动（官方故障排查与 PR #952）。
-- 这是相对官方 `moves.py` 的唯一动作偏离；呼吸波形、0.4 秒解冻混合、60 Hz、转向与语音摆头均未改变。
+### Added
+- Chinese wake word 「小派小派」 (`xiao_pai`), a microWakeWord v2 model trained
+  by lichao. It can be selected on the Home Assistant device page next to the
+  built-in wake words, or enabled together with one of them.
 
-## 0.6.2
-- 呼吸启动的反馈读取与官方一致：捕获普通 Exception、保留当前目标、稍后重试；`KeyboardInterrupt`/`SystemExit` 不吞掉。
-- 聆听冻结快照改取最后一次 `set_target` 成功返回的天线指令；成功返回不是电机到位确认。
-- `set_target` 的非网络异常也隔离并按 1 秒节流记录；聆听/转向的诊断读取失败不退出语音循环。
+### Changed
+- The model lives in the app's own `reachy_mini_ha_voice/wakewords/` and is
+  added with `--wake-word-dir`, the way upstream documents custom wake words.
+  `vendor/lva` stays identical to upstream; the default wake word is unchanged.
 
-## 0.6.1
-- 对照固定官方版本 `c178d4aa375f2a3968b1340932870b4c54af83c9` 直接采用 `BreathingMove` 类体：0.3 秒空闲后排队、下一控制帧启动，1 秒从反馈姿态过渡到中性位；稳态天线围绕 0° 反向摆动 ±15°/0.5 Hz，±0.1745 rad 仅为过渡目标。
-- 纠正 0.6.0 的整帧冻结：聆听只冻结天线，已启动（含已排队）的呼吸继续；未启动则在聆听时不新启动；退出聆听用 0.4 秒混合接回原相位。
-- 声源朝向独立合成，保留头身协同、±160° 身体边界、5 秒保持及 1.5 秒回正。
-- 未对齐范围：不含官方随机空闲工具/舞蹈情绪库和完整动作队列；音频适配、HeadWobbler 接入与追踪交接仍为本应用实现。
+## [0.10.0] - 2026-10-27
 
-## 0.6.0
-- 恢复官方 `BreathingMove` 两阶段公式（1 秒线性过渡至 ±0.1745 rad，随后 15°/0.5 Hz 天线、5 mm/0.1 Hz 头部、60 Hz），撤销持续偏置、自定义插值和固定思考摆头。
-- 非聆听阶段使用同一背景呼吸；声源朝向独立叠加，保留 5 秒等待和 1.5 秒回中。聆听冻结当时天线目标，解冻 0.4 秒。
-- 唤醒使用 0.6 秒内的方向读数；完整角度、6° 死区、±160° 身体边界不变。
-- SDK 动作心跳暂失不再使语音退出；持续 5 秒失败后仅重连 SDK WebSocket，保留 LVA/音频/HA 连接。
-- 修复 HA 仍连接时退出等待阻塞；先关闭已接受的连接，再等待服务结束。
+### Changed
+- Vendored Linux Voice Assistant synced to upstream `20f8a1f` (from `39a10e7`,
+  37 commits): paused music stays paused after an announcement, unknown keys
+  in `preferences.json` no longer prevent startup, continued conversations
+  keep the pipeline of the wake word that started them, inactive wake models
+  are unloaded, log timestamps include milliseconds.
+- Lower idle CPU: the shared playback mixing loop waits while nothing plays
+  instead of polling every 5 ms.
 
-## 0.5.2
-- 修复播放器把尚未启动时的 `appsink.eos=true` 误判为播放结束的问题；仅在真实 GStreamer EOS、PCM 队列及已提交声音都结束后完成播放。
-- 增加公告接收、首帧与结束日志（不记录签名 URL 或公告文本），以及冷启动 EOS 与首次公告 HTTP 获取回归。
+### Added
+- Upstream's pipeline-ended sound (enabled by default): a short tone when a
+  pipeline ends without a spoken reply.
 
-## 0.5.1
-- 60 Hz 控制循环并扣除计算耗时；呼吸保留 0.1 Hz/5 mm、0.5 Hz/15°；聆听后 0.4 秒混合恢复；说话时允许背景呼吸。
-- 启动/停止与静止目标使用右 −10°、左 +10° 的防抖偏置。**该持续偏置已在 0.6.0 撤回。**
-- 唤醒按完整测得角度转动：6° 死区、0.65–1.25 秒、头身协同、身体 ±160° 边界；不人为放大角度。
+All local adaptations are kept. Upstream's microphone reconnect (#491) targets
+`soundcard` capture and exits the process; it is not used because the SDK owns
+capture.
 
-## 0.5.0
-- 应用通过官方 `ReachyMiniApp` 创建 `local` SDK 实例，LVA 在可取消的工作线程中共用 `reachy_mini.media`；不再使用 `no_media` 客户端，daemon 不再释放媒体设备，Dashboard/WebRTC 视频保留。
-- HA 协议、唤醒词和动作逻辑不变。
+## [0.9.0] - 2026-10-26
 
-## 0.4.0
-- 录音与播放统一改为 SDK GStreamer 音频后端，移除 `soundcard`/PulseAudio/libmpv 依赖；Wireless 使用现有 ALSA 配置。
-- DOA 改由 SDK 音频后端提供，daemon 仅提供头部姿态；TTS PCM 通过 SDK 播放时钟驱动官方 `HeadWobbler`，经 `SetSpeechOffsetsCmd` 叠加到头部。
-- SDK 固定为 `>=1.12,<1.13`（播放排空时钟使用该版本内部接口）。旧配置中的 `audio_input_device`、`audio_output_device` 必须移除。
+### Fixed
+- Wake turn angle correction. On the robot the microphone array under-reports
+  side sources (45° reads about 20°, 90° about 54°). The raw relative angle is
+  mapped piecewise linearly 0→0°, 20→45°, 54→90°, symmetric and capped at
+  ±90°; the 3° deadband still applies to the raw reading.
+- The wake direction uses speech samples only; without any, the turn is
+  skipped instead of following non-speech readings.
+- The DOA median is linear: 0 (left) and π (right) are opposite ends, not
+  neighbours on a circle.
 
-## 0.3.2
-- 移除 libmpv 启动依赖，音乐改用 GStreamer（不驱动头部动作）。
+### Changed
+- `Wake turn` logs both the raw and the corrected relative angle.
 
-## 0.3.1
-- 移除任意 ±40° 转向上限：头与身体沿同一平滑轨迹协同转向，仅受身体 ±160° 边界限制；说话摆动仍只叠加在头部。
+## [0.8.0] - 2026-10-26
 
-## 0.3.0
-- 唤醒转向：从 daemon 缓存读取最近人声方向，结合实测头部姿态换算目标；6° 死区、0.65–1.25 秒转向、5 秒保持后 1.5 秒回正；新唤醒取消旧的保持/回正。
+### Changed
+- The wake chime plays through the SDK's local file playback
+  (`media.play_sound()`) on a dedicated thread instead of the PCM mixing loop.
+  Completion is timed from the file's frame count and sample rate; cancelling,
+  replacing or stopping never fires a stale listening callback.
+- The 60 Hz motion loop runs on a dedicated `ha-motion` thread fed by the
+  event queue. Startup and shutdown motions run outside it; shutdown stops the
+  thread before cleaning up connections.
 
-## 0.2.1
-- 头部追踪默认关闭，仅当 `config.json` 中 `head_tracking` 显式为 `true` 时启用。
+Turn, breathing, antenna and speech wobble behaviour is unchanged.
 
-## 0.2.0
-- TTS 使用实际解码 PCM 驱动官方 `HeadWobbler`；播放完成或打断时清零语音偏移。音乐使用独立播放器且不参与摆头。
+## [0.7.2] - 2026-10-25
 
-## 0.1.1
-- 空闲呼吸采用官方参数：0.1 Hz/±5 mm 头部、0.5 Hz/±15° 天线，0.3 秒空闲延时、1 秒过渡，聆听时冻结。
+### Fixed
+- Startup wake-up matches the official conversation app: the sleep pose is
+  detected with `SLEEP_HEAD_POSE` and `distance_between_poses`, and the motors
+  are enabled before `wake_up()`. Starting the app while the robot slept used
+  to play the sound without moving.
 
-## 0.1.0
-- 首个可安装版本：官方 `ReachyMiniApp` 入口，内置 Linux Voice Assistant 运行时，ESPHome 自动发现与本地唤醒。
+## [0.7.1] - 2026-10-25
+
+### Fixed
+- `wake_up()` runs only when the measured head pose is the sleep pose, so the
+  wake animation and sound are not repeated when the robot is already awake.
+  Without pose telemetry the app still wakes the robot once.
+
+## [0.7.0] - 2026-10-24
+
+### Changed
+- Wake direction window widened from 0.4 s to 0.8 s to cover the whole wake
+  word. With at least 3 speech samples only they are used; otherwise speech
+  samples seed a ±30° cluster before taking the median.
+- Wake turn deadband reduced from 6° to 3°.
+
+## [0.6.5] - 2026-10-24
+
+### Changed
+- Wake direction uses the circular median of speech readings from the last
+  0.4 s instead of the last single DOA sample, and logs its source.
+
+## [0.6.4] - 2026-10-24
+
+### Fixed
+- Leaving listening blends from the last antenna command that was actually
+  sent, so a failed send no longer causes an extra jump.
+
+## [0.6.3] - 2026-10-24
+
+### Changed
+- When an antenna is within 8° of 0° as listening freezes it, it moves to
+  ±10° on the same side over 0.2 s before locking, because holding at 0°
+  makes the gearbox jitter. This is the only deviation from the official
+  motion code.
+
+## [0.6.2] - 2026-10-24
+
+### Fixed
+- Breathing start-up handles feedback errors like the official app.
+- The listening freeze uses the last successfully sent antenna command.
+- Non-network `set_target` errors are isolated and logged at most once per
+  second; diagnostic read failures no longer stop the voice loop.
+
+## [0.6.1] - 2026-10-24
+
+### Fixed
+- `BreathingMove` taken verbatim from the official conversation app (commit
+  `c178d4a`). Listening freezes only the antennas; breathing already started
+  continues, and leaving listening blends back over 0.4 s.
+
+## [0.6.0] - 2026-10-24
+
+### Changed
+- Restored the official two-phase breathing and removed the custom bias,
+  interpolation and thinking sway.
+
+### Fixed
+- A lost SDK motion connection no longer stops voice; after 5 s only the SDK
+  WebSocket reconnects.
+- Shutdown no longer blocks while Home Assistant is still connected.
+
+## [0.5.2] - 2026-10-24
+
+### Fixed
+- The player no longer treats `appsink.eos=true` before start as the end of
+  playback; playback completes only after a real GStreamer EOS and drained
+  audio.
+
+### Added
+- Announcement receive, first-frame and end logs (no signed URLs or text).
+
+## [0.5.1] - 2026-10-24
+
+### Changed
+- 60 Hz control loop with compute-time compensation; wake turns use the full
+  measured angle with coordinated head and body.
+
+## [0.5.0] - 2026-10-24
+
+### Changed
+- The app uses the official `ReachyMiniApp` local SDK instance and LVA shares
+  `reachy_mini.media`; dashboard video keeps working.
+
+## [0.4.0] - 2026-10-24
+
+### Changed
+- Recording and playback use the SDK GStreamer audio backend; `soundcard`,
+  PulseAudio and libmpv are no longer needed. DOA comes from the SDK. Old
+  `audio_input_device` and `audio_output_device` settings must be removed.
+
+## [0.3.2] - 2026-10-23
+
+### Removed
+- libmpv startup dependency; music plays through GStreamer.
+
+## [0.3.1] - 2026-10-23
+
+### Changed
+- Removed the ±40° turn cap; head and body turn together within the body's
+  ±160° range.
+
+## [0.3.0] - 2026-10-23
+
+### Added
+- Wake turn toward the speaker: 0.65–1.25 s turn, 5 s hold, 1.5 s return; a
+  new wake cancels the hold or return.
+
+## [0.2.1] - 2026-10-23
+
+### Changed
+- Head tracking is off by default; set `head_tracking` to `true` in
+  `config.json` to enable it.
+
+## [0.2.0] - 2026-10-23
+
+### Added
+- Decoded TTS audio drives the official `HeadWobbler`; music does not.
+
+## [0.1.1] - 2026-10-23
+
+### Changed
+- Idle breathing uses the official parameters.
+
+## [0.1.0] - 2026-10-23
+
+### Added
+- First installable version: official `ReachyMiniApp` entry point, bundled
+  Linux Voice Assistant runtime, ESPHome discovery and local wake word.
+
+[0.12.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.0...v0.12.1
+[0.12.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.11.0...v0.12.0
+[0.11.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.10.0...v0.11.0
+[0.10.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.9.0...v0.10.0
+[0.9.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.8.0...v0.9.0
+[0.8.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.7.2...v0.8.0
+[0.7.2]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.7.1...v0.7.2
+[0.7.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.7.0...v0.7.1
+[0.7.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.6.5...v0.7.0
+[0.6.5]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.6.4...v0.6.5
+[0.6.4]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.6.3...v0.6.4
+[0.6.3]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.6.2...v0.6.3
+[0.6.2]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.6.1...v0.6.2
+[0.6.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.6.0...v0.6.1
+[0.6.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.5.2...v0.6.0
+[0.5.2]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.5.1...v0.5.2
+[0.5.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.5.0...v0.5.1
+[0.5.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.4.0...v0.5.0
+[0.4.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.3.2...v0.4.0
+[0.3.2]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.3.1...v0.3.2
+[0.3.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.3.0...v0.3.1
+[0.3.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.2.1...v0.3.0
+[0.2.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.2.0...v0.2.1
+[0.2.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.1.1...v0.2.0
+[0.1.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.1.0...v0.1.1
+[0.1.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/releases/tag/v0.1.0

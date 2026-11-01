@@ -7,7 +7,7 @@ import sys
 import threading
 from pathlib import Path
 
-from websockets.client import connect
+from websockets.asyncio.client import connect
 from websockets.exceptions import WebSocketException
 
 _LOG = logging.getLogger(__name__)

@@ -2,10 +2,16 @@ name: Test and package
 on: [push, pull_request, workflow_dispatch]
 jobs:
   linux:
-    runs-on: ubuntu-latest
+    # The oldest supported SDK (what a robot may still run) and the newest release.
+    strategy:
+      fail-fast: false
+      matrix:
+        sdk: ['1.12.0', 'latest']
+    name: linux (SDK ${{ matrix.sdk }})
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Use Ubuntu archive for system dependencies
@@ -14,8 +20,12 @@ jobs:
       - run: sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 update && sudo apt-get -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30 -o Acquire::Retries=2 install -y libasound2-dev libcairo2-dev libgirepository1.0-dev gir1.2-gstreamer-1.0 gir1.2-gst-plugins-base-1.0 gstreamer1.0-alsa gstreamer1.0-plugins-good gstreamer1.0-libav
       - name: Ensure libmpv is absent (Wireless startup regression)
         run: sudo apt-get purge -y libmpv2 libmpv-dev mpv
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v7
       - run: uv pip install --system -e '.[test]'
+      - name: Pin the oldest supported SDK
+        if: matrix.sdk != 'latest'
+        run: uv pip install --system "reachy-mini==${{ matrix.sdk }}"
+      - run: python -c "from importlib.metadata import version as v; print('reachy-mini', v('reachy-mini'), 'websockets', v('websockets'))"
       - run: python -m pytest -q
       - run: ruff check reachy_mini_ha_voice tests
       - run: python -m build
@@ -32,15 +42,15 @@ jobs:
     # main only after the full Linux suite above has passed. Other pushes only test.
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     needs: linux
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     concurrency: release
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with:
           fetch-depth: 0
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
       - name: Find unreleased version
@@ -66,7 +76,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ steps.version.outputs.tag }}
         run: |
-          awk -v v="## ${TAG#v}" '$0 == v {found=1; print; next} found && /^## / {exit} found' CHANGELOG.md > notes.md
+          awk -v v="## [${TAG#v}]" 'index($0, v) == 1 {found=1; next} found && /^## / {exit} found' CHANGELOG.md > notes.md
           test -s notes.md || { echo "No CHANGELOG section for $TAG"; exit 1; }
-          printf '\n完整记录见 [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md)。\n' "$GITHUB_REPOSITORY" >> notes.md
+          printf '\nFull history: [CHANGELOG.md](https://github.com/%s/blob/main/CHANGELOG.md)\n' "$GITHUB_REPOSITORY" >> notes.md
           gh release create "$TAG" --target "$GITHUB_SHA" --title "$TAG" --notes-file notes.md

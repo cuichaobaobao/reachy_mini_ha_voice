@@ -1,7 +1,8 @@
 """Mirror the tested GitHub source to the Hugging Face Space (run by CI on a release tag).
 
-Uploads every git-tracked file and deletes application files the release no longer
-contains. Requires HF_TOKEN with write access to the Space only.
+Uploads every git-tracked file and deletes Space files the release no longer contains
+(the Space's own .gitattributes is kept). Requires HF_TOKEN with write access to the
+Space only.
 """
 
 import os
@@ -12,6 +13,7 @@ from pathlib import Path
 from huggingface_hub import CommitOperationAdd, CommitOperationDelete, HfApi
 
 REPO_ID = "lichao622/reachy_mini_ha_voice"
+SPACE_FILES = {".gitattributes"}  # Managed by Hugging Face, not by this repository.
 ROOT = Path(__file__).resolve().parents[1]
 
 
@@ -30,7 +32,7 @@ def main():
     operations = [CommitOperationAdd(path_in_repo=name, path_or_fileobj=str(ROOT / name))
                   for name in files]
     for name in api.list_repo_files(REPO_ID, repo_type="space"):
-        if name.startswith("reachy_mini_ha_voice/") and name not in tracked:
+        if name not in tracked and name not in SPACE_FILES:
             operations.append(CommitOperationDelete(path_in_repo=name))
     commit = api.create_commit(REPO_ID, repo_type="space", operations=operations,
                                commit_message=f"Sync tested GitHub source {sha} ({tag})")

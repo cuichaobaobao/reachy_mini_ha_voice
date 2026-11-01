@@ -1,1 +1,20 @@
-*{box-sizing:border-box}body{margin:0;background:#f2f4ed;color:#173c37;font:18px/1.7 system-ui,sans-serif}main{max-width:900px;margin:0 auto;padding:64px 24px}.label{letter-spacing:.12em;font-size:13px}h1{font-size:clamp(38px,7vw,72px);line-height:1.2;font-weight:650;margin:32px 0}h2{font-size:24px}section{background:white;border-radius:20px;padding:24px 32px;margin:24px 0}nav{display:flex;gap:16px;flex-wrap:wrap}a{display:inline-block;padding:12px 20px;border-radius:28px;background:#173c37;color:white;text-decoration:none}footer{font-size:13px;margin-top:48px;color:#55756d}
+* { box-sizing: border-box; }
+body { margin: 0; background: #f4f4ef; color: #1f2a28; font: 17px/1.65 system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif; }
+main { position: relative; max-width: 680px; margin: 0 auto; padding: 56px 20px 64px; }
+h1 { font-size: 34px; line-height: 1.2; margin: 0 0 8px; }
+h2 { font-size: 20px; margin: 32px 0 8px; }
+.lead { font-size: 19px; color: #3d5a54; margin-top: 0; }
+ul { padding-left: 20px; }
+li { margin: 4px 0; }
+a { color: #1d5c52; }
+.links a { display: inline-block; margin: 8px 16px 0 0; }
+.note { margin-top: 40px; font-size: 14px; color: #6b7d78; }
+#lang { position: absolute; top: 20px; right: 20px; padding: 6px 14px; border: 1px solid #b9c4bf; border-radius: 16px; background: #fff; color: #1f2a28; font: inherit; font-size: 14px; cursor: pointer; }
+#lang:hover { border-color: #1d5c52; }
+@media (prefers-color-scheme: dark) {
+  body { background: #181c1b; color: #e6ebe9; }
+  .lead { color: #a9bdb7; }
+  a { color: #8fd0c3; }
+  .note { color: #8a9a95; }
+  #lang { background: #232927; color: #e6ebe9; border-color: #3d4845; }
+}
