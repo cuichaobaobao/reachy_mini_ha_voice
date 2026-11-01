@@ -100,8 +100,9 @@ Restart the app after editing it.
   may be less accurate.
 - 小派小派 is a self-trained model; check how well it wakes in your home and
   adjust the sensitivity.
-- During conversations the media player stays *idle* (same as upstream Linux
-  Voice Assistant); the Assist satellite entity shows the conversation state.
+- During conversations the media player stays *idle*: replies are played
+  directly, not through the media player. The Assist satellite entity shows
+  the conversation state.
 
 ## How it works
 
@@ -128,7 +129,6 @@ are in [TESTING.md](TESTING.md).
 
 - [Linux Voice Assistant](https://github.com/OHF-Voice/linux-voice-assistant) by the Open Home Foundation
 - [Reachy Mini conversation app](https://github.com/pollen-robotics/reachy_mini_conversation_app) by Pollen Robotics
-- Wake-up ideas from [ha-china/Reachy_Mini_For_Home_Assistant](https://github.com/ha-china/Reachy_Mini_For_Home_Assistant)
 
 This is a community app, not made by Pollen Robotics. Licensed under
 Apache-2.0; bundled third-party code is listed in [THIRD_PARTY.md](THIRD_PARTY.md).

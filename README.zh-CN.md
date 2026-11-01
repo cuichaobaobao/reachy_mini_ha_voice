@@ -69,7 +69,7 @@
 - 麦克风阵列分不清正前和正后，从背后说话时机器人可能转到对称的方向。
 - 侧面方向的校正数据来自一台机器人，换个房间可能没那么准。
 - 小派小派是自己训练的模型，请在家里实际试试唤醒效果，按需调灵敏度。
-- 对话时 Media Player 一直显示“空闲”（上游 Linux Voice Assistant 也是这样），对话状态请看“语音助手卫星”实体。
+- 对话时 Media Player 一直显示“空闲”，因为回答是直接播放的，不经过 Media Player。想看对话状态，请看“语音助手卫星”实体。
 
 ## 原理
 
@@ -90,6 +90,5 @@ reachy-mini-app-assistant check .
 
 - Open Home Foundation 的 [Linux Voice Assistant](https://github.com/OHF-Voice/linux-voice-assistant)
 - Pollen Robotics 的 [Reachy Mini 对话应用](https://github.com/pollen-robotics/reachy_mini_conversation_app)
-- 唤醒相关思路参考 [ha-china/Reachy_Mini_For_Home_Assistant](https://github.com/ha-china/Reachy_Mini_For_Home_Assistant)
 
 这是社区应用，不是 Pollen Robotics 官方出品。采用 Apache-2.0 许可，内置的第三方代码见 [THIRD_PARTY.md](THIRD_PARTY.md)。
