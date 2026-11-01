@@ -5,6 +5,15 @@ All notable changes to this project are documented here. The format follows
 [Semantic Versioning](https://semver.org/): new behaviour raises the minor
 version, fixes raise the patch version.
 
+## [0.12.2] - 2026-11-01
+
+No change to the app itself.
+
+### Changed
+- README rewritten in both languages: shorter, organised as features,
+  install, Home Assistant controls, settings, known limitations and credits,
+  with test, release and license badges.
+
 ## [0.12.1] - 2026-11-01
 
 No change to wake, conversation, motion or the Home Assistant protocol.
@@ -248,6 +257,7 @@ Turn, breathing, antenna and speech wobble behaviour is unchanged.
 - First installable version: official `ReachyMiniApp` entry point, bundled
   Linux Voice Assistant runtime, ESPHome discovery and local wake word.
 
+[0.12.2]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.1...v0.12.2
 [0.12.1]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.12.0...v0.12.1
 [0.12.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/cuichaobaobao/reachy_mini_ha_voice/compare/v0.10.0...v0.11.0
